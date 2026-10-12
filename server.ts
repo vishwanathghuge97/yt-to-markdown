@@ -2,7 +2,7 @@ import http from 'http';
 import path from 'path';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
-import app from './api/app';
+import app from './api/index';
 
 dotenv.config();
 
