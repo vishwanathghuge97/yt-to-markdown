@@ -30,7 +30,33 @@ const provider = new GoogleAuthProvider();
 SCOPES.forEach((scope) => provider.addScope(scope));
 
 let isSigningIn = false;
-let cachedAccessToken: string | null = null;
+const DRIVE_TOKEN_KEY = 'yt_markdown_drive_access_token';
+const DRIVE_TOKEN_TIME_KEY = 'yt_markdown_drive_access_token_time';
+const DRIVE_TOKEN_TTL_MS = 50 * 60 * 1000;
+
+function loadCachedAccessToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  const token = sessionStorage.getItem(DRIVE_TOKEN_KEY);
+  const issuedAt = Number(sessionStorage.getItem(DRIVE_TOKEN_TIME_KEY) || 0);
+  if (token && issuedAt && Date.now() - issuedAt < DRIVE_TOKEN_TTL_MS) return token;
+  sessionStorage.removeItem(DRIVE_TOKEN_KEY);
+  sessionStorage.removeItem(DRIVE_TOKEN_TIME_KEY);
+  return null;
+}
+
+let cachedAccessToken: string | null = loadCachedAccessToken();
+
+function cacheAccessToken(token: string | null) {
+  cachedAccessToken = token;
+  if (typeof window === 'undefined') return;
+  if (token) {
+    sessionStorage.setItem(DRIVE_TOKEN_KEY, token);
+    sessionStorage.setItem(DRIVE_TOKEN_TIME_KEY, String(Date.now()));
+  } else {
+    sessionStorage.removeItem(DRIVE_TOKEN_KEY);
+    sessionStorage.removeItem(DRIVE_TOKEN_TIME_KEY);
+  }
+}
 let currentUser: User | null = null;
 
 export const initAuth = (
@@ -43,11 +69,11 @@ export const initAuth = (
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
       } else if (!isSigningIn) {
-        cachedAccessToken = null;
+        cacheAccessToken(null);
         if (onAuthFailure) onAuthFailure();
       }
     } else {
-      cachedAccessToken = null;
+      cacheAccessToken(null);
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -62,9 +88,9 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
       throw new Error('Failed to obtain Google access token');
     }
 
-    cachedAccessToken = credential.accessToken;
+    cacheAccessToken(credential.accessToken);
     currentUser = result.user;
-    return { user: result.user, accessToken: cachedAccessToken };
+    return { user: result.user, accessToken: credential.accessToken };
   } catch (error: any) {
     console.error('Sign-in error:', error);
     throw error;
@@ -83,6 +109,6 @@ export const getCurrentUser = (): User | null => {
 
 export const logout = async () => {
   await signOut(auth);
-  cachedAccessToken = null;
+  cacheAccessToken(null);
   currentUser = null;
 };
