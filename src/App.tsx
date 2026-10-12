@@ -33,6 +33,8 @@ import {
   ExternalLink,
   Layers,
   Key,
+  ClipboardPaste,
+  X,
 } from 'lucide-react';
 
 interface SegmentRoadmapItem {
@@ -151,6 +153,20 @@ export default function App() {
     stopRequestedRef.current = true;
     setStatusMessage('Compiling markdown for completed segments...');
     addLog('User requested early compilation. Assembling markdown...');
+  };
+
+  const handleQuickPaste = async () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          setCurrentUrl(text.trim());
+          if (inputError) setInputError('');
+        }
+      }
+    } catch {
+      // ignore clipboard permission error
+    }
   };
 
   // Helper to strictly validate YouTube URL / video ID
@@ -473,14 +489,14 @@ export default function App() {
       />
 
       {/* 2. Main Content */}
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6 space-y-5">
+      <main className="flex-1 max-w-4xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
         {/* URL Input Form */}
-        <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 sm:p-4 shadow-sm transition-colors">
+        <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3.5 sm:p-4 shadow-sm transition-colors">
           <form onSubmit={handleStartAnalysis} className="space-y-3">
             {!customApiKey && (
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200">
-                <div className="flex items-center gap-2">
-                  <Key className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <div className="flex items-start sm:items-center gap-2">
+                  <Key className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
                   <span>
                     <strong>Bring Your Own Key (BYOK):</strong> Please provide your free Google Gemini API key to generate notes.
                   </span>
@@ -488,7 +504,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsApiKeyModalOpen(true)}
-                  className="px-2.5 py-1 text-xs font-mono font-medium rounded bg-amber-600 hover:bg-amber-700 text-white transition shrink-0 self-start sm:self-auto shadow-xs"
+                  className="px-3 py-1.5 min-h-[36px] sm:min-h-0 text-xs font-mono font-medium rounded bg-amber-600 hover:bg-amber-700 text-white transition shrink-0 self-start sm:self-auto shadow-xs touch-manipulation"
                 >
                   Enter Free Key
                 </button>
@@ -496,33 +512,58 @@ export default function App() {
             )}
 
             {inputError && (
-              <div className="flex items-center gap-2 p-2.5 rounded-md bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-300 text-xs font-mono">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+              <div className="flex items-start sm:items-center gap-2 p-2.5 rounded-md bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-300 text-xs font-mono">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5 sm:mt-0" />
                 <span>{inputError}</span>
               </div>
             )}
 
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="text"
-                value={currentUrl}
-                onChange={(e) => {
-                  setCurrentUrl(e.target.value);
-                  if (inputError) setInputError('');
-                }}
-                placeholder="Paste YouTube link (e.g. https://www.youtube.com/watch?v=...)"
-                className="flex-1 px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-md text-xs sm:text-sm font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400"
-                disabled={isAnalyzing}
-              />
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-2.5">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={currentUrl}
+                  onChange={(e) => {
+                    setCurrentUrl(e.target.value);
+                    if (inputError) setInputError('');
+                  }}
+                  placeholder="Paste YouTube link (e.g. youtube.com/watch?v=...)"
+                  className="w-full pl-3.5 pr-16 sm:pr-20 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-md text-base sm:text-sm font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400 min-h-[44px]"
+                  disabled={isAnalyzing}
+                />
+                
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  {currentUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => setCurrentUrl('')}
+                      className="p-1 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition touch-manipulation"
+                      title="Clear URL"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleQuickPaste}
+                      className="px-2 py-1 text-[11px] font-mono text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded transition flex items-center gap-1 touch-manipulation"
+                      title="Paste from clipboard"
+                    >
+                      <ClipboardPaste className="w-3 h-3" />
+                      <span>Paste</span>
+                    </button>
+                  )}
+                </div>
+              </div>
 
               <button
                 type="submit"
                 disabled={isAnalyzing || !currentUrl.trim()}
-                className="px-4 py-2.5 bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-950 rounded-md text-xs sm:text-sm font-medium transition flex items-center justify-center gap-2 disabled:opacity-40 shrink-0 font-mono shadow-xs"
+                className="w-full sm:w-auto px-5 py-2.5 min-h-[44px] bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-950 rounded-md text-sm font-medium transition flex items-center justify-center gap-2 disabled:opacity-40 shrink-0 font-mono shadow-xs touch-manipulation active:scale-[0.98]"
               >
                 {isAnalyzing ? (
                   <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <RefreshCw className="w-4 h-4 animate-spin" />
                     <span>Processing...</span>
                   </>
                 ) : (
@@ -535,11 +576,11 @@ export default function App() {
             </div>
 
             {/* Collapsible Advanced Options */}
-            <div className="pt-1">
+            <div className="pt-0.5">
               <button
                 type="button"
                 onClick={() => setShowOptions(!showOptions)}
-                className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 flex items-center gap-1.5 transition"
+                className="text-xs font-mono text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 flex items-center gap-1.5 transition py-1 touch-manipulation"
               >
                 <SlidersHorizontal className="w-3 h-3" />
                 <span>{showOptions ? 'Hide video options' : 'Video options (duration override / notes)'}</span>
@@ -547,13 +588,13 @@ export default function App() {
               </button>
 
               {showOptions && (
-                <div className="mt-3 p-3 bg-zinc-50 dark:bg-zinc-950/60 rounded border border-zinc-200 dark:border-zinc-800/80 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="mt-2.5 p-3 bg-zinc-50 dark:bg-zinc-950/60 rounded border border-zinc-200 dark:border-zinc-800/80 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div>
                     <label className="block text-[11px] font-mono text-zinc-600 dark:text-zinc-400 mb-1">
-                      Duration override (if unlisted or custom length):
+                      Duration override (optional):
                     </label>
                     <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <input
                           type="number"
                           min="0"
@@ -561,11 +602,11 @@ export default function App() {
                           placeholder="8"
                           value={customHours}
                           onChange={(e) => setCustomHours(e.target.value)}
-                          className="w-14 px-2 py-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs text-center"
+                          className="w-16 h-9 px-2 py-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs sm:text-sm text-center"
                         />
                         <span className="text-zinc-500 text-[11px]">hrs</span>
                       </div>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <input
                           type="number"
                           min="0"
@@ -573,7 +614,7 @@ export default function App() {
                           placeholder="00"
                           value={customMinutes}
                           onChange={(e) => setCustomMinutes(e.target.value)}
-                          className="w-14 px-2 py-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs text-center"
+                          className="w-16 h-9 px-2 py-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs sm:text-sm text-center"
                         />
                         <span className="text-zinc-500 text-[11px]">mins</span>
                       </div>
@@ -589,7 +630,7 @@ export default function App() {
                       placeholder="e.g. Node.js Express crash course"
                       value={customNotes}
                       onChange={(e) => setCustomNotes(e.target.value)}
-                      className="w-full px-2.5 py-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs"
+                      className="w-full h-9 px-2.5 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs sm:text-sm"
                     />
                   </div>
                 </div>
@@ -600,27 +641,27 @@ export default function App() {
 
         {/* Real-time Visual Progress Indicator */}
         {isAnalyzing && (
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-4 space-y-4 shadow-sm transition-colors">
+          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3.5 sm:p-4 space-y-3.5 shadow-sm transition-colors">
             {/* Header / Active status line */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-zinc-100 dark:border-zinc-800/80">
-              <div className="space-y-0.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-zinc-100 dark:border-zinc-800/80">
+              <div className="space-y-1 min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="relative flex h-2 w-2">
+                  <span className="relative flex h-2 w-2 shrink-0">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   </span>
-                  <span className="font-mono text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                  <span className="font-mono text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate">
                     {statusMessage}
                   </span>
                 </div>
                 {currentVideoMeta && (
-                  <p className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 truncate max-w-lg">
+                  <p className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 truncate">
                     {currentVideoMeta.title} ({formatTimestamp(currentVideoMeta.durationSec)})
                   </p>
                 )}
               </div>
 
-              <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-zinc-100 dark:border-zinc-800/60">
                 <div className="flex items-center gap-1.5 font-mono text-xs text-zinc-500 dark:text-zinc-400">
                   <Clock className="w-3.5 h-3.5" />
                   <span>{elapsedSec}s elapsed</span>
@@ -628,7 +669,7 @@ export default function App() {
 
                 <button
                   onClick={handleStopEarly}
-                  className="px-2.5 py-1 border border-zinc-300 dark:border-zinc-700 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition flex items-center gap-1.5"
+                  className="px-2.5 py-1.5 min-h-[36px] sm:min-h-0 border border-zinc-300 dark:border-zinc-700 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition flex items-center gap-1.5 touch-manipulation active:scale-95"
                   title="Finish current segments and assemble markdown immediately"
                 >
                   <StopCircle className="w-3.5 h-3.5 text-red-500" />
@@ -660,7 +701,7 @@ export default function App() {
                   <span>Coverage Timeline (Zero-Skip)</span>
                   <span>{formatTimestamp(currentVideoMeta?.durationSec || 0)}</span>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
                   {plannedChunks.map((chunk, idx) => {
                     const isCurrent = activeChunkIndex === idx;
                     const isDone = chunk.status === 'completed';
@@ -669,7 +710,7 @@ export default function App() {
                     return (
                       <div
                         key={idx}
-                        className={`p-1.5 rounded border text-[11px] font-mono flex items-center justify-between transition-colors ${
+                        className={`p-2 rounded border text-xs font-mono flex items-center justify-between transition-colors ${
                           isCurrent
                             ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-100 dark:bg-zinc-800 font-semibold'
                             : isDone
@@ -682,9 +723,9 @@ export default function App() {
                         <span className="truncate">
                           #{idx + 1} {formatTimestamp(chunk.nominalStartSec)} - {formatTimestamp(chunk.nominalEndSec)}
                         </span>
-                        {isCurrent && <RefreshCw className="w-3 h-3 animate-spin shrink-0 ml-1 text-zinc-900 dark:text-zinc-100" />}
-                        {isDone && <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0 ml-1" />}
-                        {isFailed && <AlertCircle className="w-3 h-3 text-amber-500 shrink-0 ml-1" />}
+                        {isCurrent && <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 ml-1.5 text-zinc-900 dark:text-zinc-100" />}
+                        {isDone && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 ml-1.5" />}
+                        {isFailed && <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 ml-1.5" />}
                       </div>
                     );
                   })}
@@ -697,19 +738,19 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setShowLogs(!showLogs)}
-                className="w-full px-3 py-1.5 bg-zinc-50 dark:bg-zinc-950 flex items-center justify-between text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition"
+                className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-950 flex items-center justify-between text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition touch-manipulation"
               >
-                <div className="flex items-center gap-1.5 text-[11px]">
-                  <Terminal className="w-3 h-3" />
+                <div className="flex items-center gap-1.5 text-xs">
+                  <Terminal className="w-3.5 h-3.5" />
                   <span>Activity Log ({activityLogs.length} events)</span>
                 </div>
-                {showLogs ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                {showLogs ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
               </button>
 
               {showLogs && (
-                <div className="p-2.5 bg-zinc-900 dark:bg-zinc-950 text-zinc-300 text-[11px] font-mono max-h-36 overflow-y-auto space-y-1">
+                <div className="p-3 bg-zinc-900 dark:bg-zinc-950 text-zinc-300 text-xs font-mono max-h-40 overflow-y-auto space-y-1">
                   {activityLogs.map((log, i) => (
-                    <div key={i} className="leading-snug">
+                    <div key={i} className="leading-relaxed">
                       {log}
                     </div>
                   ))}
@@ -728,12 +769,12 @@ export default function App() {
             onOpenDriveModal={() => setIsDriveModalOpen(true)}
           />
         ) : !isAnalyzing && (
-          <div className="border border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg p-8 text-center space-y-2">
-            <div className="w-9 h-9 rounded-md bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center mx-auto text-zinc-500">
-              <FileText className="w-4 h-4" />
+          <div className="border border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg p-6 sm:p-8 text-center space-y-3">
+            <div className="w-10 h-10 rounded-md bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center mx-auto text-zinc-500">
+              <FileText className="w-5 h-5" />
             </div>
             <div className="space-y-1">
-              <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 Generate Markdown from YouTube
               </h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto">

@@ -51,26 +51,26 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
   return (
     <div className="bg-white dark:bg-zinc-950 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-2xs font-sans">
       {/* File Header Bar (GitHub Gist Style) */}
-      <div className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+      <div className="px-3 sm:px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
         {/* File Name & Stats */}
-        <div className="flex items-center space-x-2.5 overflow-hidden">
-          <div className="font-mono font-medium text-zinc-900 dark:text-zinc-100 truncate flex items-center gap-1.5">
-            <span className="text-zinc-400">📄</span>
-            <span>{cleanFileName()}</span>
+        <div className="flex items-center space-x-2 overflow-hidden min-w-0">
+          <div className="font-mono font-medium text-zinc-900 dark:text-zinc-100 truncate flex items-center gap-1.5 text-xs">
+            <span className="text-zinc-400 shrink-0">📄</span>
+            <span className="truncate">{cleanFileName()}</span>
           </div>
-          <span className="text-zinc-300 dark:text-zinc-700">|</span>
-          <span className="font-mono text-[11px] text-zinc-500 shrink-0">
-            {lineCount} lines · {wordCount.toLocaleString()} words · {sizeKb} KB
+          <span className="text-zinc-300 dark:text-zinc-700 shrink-0">|</span>
+          <span className="font-mono text-[10px] sm:text-[11px] text-zinc-500 shrink-0">
+            {lineCount}L · {wordCount.toLocaleString()}W · {sizeKb}KB
           </span>
         </div>
 
         {/* Utilitarian Actions */}
-        <div className="flex items-center space-x-1.5 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0 flex-wrap sm:flex-nowrap justify-between sm:justify-end pt-1 sm:pt-0 border-t sm:border-t-0 border-zinc-200 dark:border-zinc-800">
           {/* View Toggle */}
-          <div className="flex border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 p-0.5 text-xs mr-1">
+          <div className="flex border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 p-0.5 text-xs">
             <button
               onClick={() => setViewMode('preview')}
-              className={`px-2 py-0.5 rounded font-mono text-[11px] transition ${
+              className={`px-2.5 py-1 min-h-[32px] sm:min-h-0 rounded font-mono text-[11px] transition touch-manipulation ${
                 viewMode === 'preview'
                   ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-semibold'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900'
@@ -80,7 +80,7 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
             </button>
             <button
               onClick={() => setViewMode('raw')}
-              className={`px-2 py-0.5 rounded font-mono text-[11px] transition ${
+              className={`px-2.5 py-1 min-h-[32px] sm:min-h-0 rounded font-mono text-[11px] transition touch-manipulation ${
                 viewMode === 'raw'
                   ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-semibold'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900'
@@ -90,53 +90,58 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
             </button>
           </div>
 
-          {/* Copy */}
-          <button
-            onClick={handleCopy}
-            className="px-2.5 py-1 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 rounded text-xs font-mono transition flex items-center gap-1"
-          >
-            {copied ? (
-              <>
-                <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                <span className="text-emerald-700 dark:text-emerald-400">Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3 h-3 text-zinc-500" />
-                <span>Copy</span>
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-1.5">
+            {/* Copy */}
+            <button
+              onClick={handleCopy}
+              className="px-2.5 py-1.5 min-h-[34px] sm:min-h-0 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 rounded text-xs font-mono transition flex items-center gap-1 touch-manipulation active:scale-95"
+              aria-label="Copy markdown"
+            >
+              {copied ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-emerald-700 dark:text-emerald-400">Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5 text-zinc-500" />
+                  <span>Copy</span>
+                </>
+              )}
+            </button>
 
-          {/* Download */}
-          <button
-            onClick={handleDownload}
-            className="px-2.5 py-1 bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 rounded text-xs font-mono font-medium transition flex items-center gap-1"
-          >
-            <Download className="w-3 h-3" />
-            <span>Download</span>
-          </button>
+            {/* Download */}
+            <button
+              onClick={handleDownload}
+              className="px-2.5 py-1.5 min-h-[34px] sm:min-h-0 bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 rounded text-xs font-mono font-medium transition flex items-center gap-1 touch-manipulation active:scale-95"
+              aria-label="Download markdown file"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download</span>
+            </button>
 
-          {/* Save to Drive */}
-          <button
-            onClick={onOpenDriveModal}
-            className="px-2.5 py-1 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 rounded text-xs font-mono transition flex items-center gap-1"
-            title="Save copy to Google Drive"
-          >
-            <HardDrive className="w-3 h-3 text-zinc-500" />
-            <span>Drive</span>
-          </button>
+            {/* Save to Drive */}
+            <button
+              onClick={onOpenDriveModal}
+              className="px-2.5 py-1.5 min-h-[34px] sm:min-h-0 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 rounded text-xs font-mono transition flex items-center gap-1 touch-manipulation active:scale-95"
+              title="Save copy to Google Drive"
+              aria-label="Save to Google Drive"
+            >
+              <HardDrive className="w-3.5 h-3.5 text-zinc-500" />
+              <span>Drive</span>
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Content Area */}
-      <div className="p-6 overflow-y-auto max-h-[800px] bg-white dark:bg-zinc-950">
+      <div className="p-3.5 sm:p-6 md:p-8 overflow-y-auto max-h-[75vh] sm:max-h-[800px] bg-white dark:bg-zinc-950">
         {viewMode === 'raw' ? (
-          <div className="bg-zinc-900 text-zinc-100 p-4 rounded font-mono text-xs overflow-x-auto leading-relaxed border border-zinc-800">
-            <pre className="whitespace-pre-wrap">{markdownContent}</pre>
+          <div className="bg-zinc-900 text-zinc-100 p-3 sm:p-4 rounded font-mono text-xs overflow-x-auto leading-relaxed border border-zinc-800">
+            <pre className="whitespace-pre-wrap break-words">{markdownContent}</pre>
           </div>
         ) : (
-          <div className="max-w-none text-zinc-800 dark:text-zinc-200 text-sm leading-relaxed space-y-4">
+          <div className="max-w-none text-zinc-800 dark:text-zinc-200 text-xs sm:text-sm leading-relaxed space-y-3 sm:space-y-4">
             {renderMarkdown(markdownContent)}
           </div>
         )}
@@ -217,6 +222,58 @@ function renderMarkdown(content: string) {
 
     if (inCodeBlock) {
       codeBlockLines.push(line);
+      continue;
+    }
+
+    if (line.trim().startsWith('|')) {
+      const tableLines: string[] = [line];
+      while (i + 1 < lines.length && lines[i + 1].trim().startsWith('|')) {
+        i++;
+        tableLines.push(lines[i]);
+      }
+
+      const rows = tableLines.map((row) =>
+        row
+          .split('|')
+          .slice(1, -1)
+          .map((c) => c.trim())
+      );
+
+      const headerRow = rows[0] || [];
+      const dataRows = rows.slice(1).filter((r) => !r.every((c) => /^[-:]+$/.test(c)));
+
+      elements.push(
+        <div
+          key={`table-${i}`}
+          className="overflow-x-auto my-3.5 -mx-1 sm:mx-0 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-2xs"
+        >
+          <table className="min-w-full text-xs font-mono divide-y divide-zinc-200 dark:divide-zinc-800">
+            <thead className="bg-zinc-50 dark:bg-zinc-900">
+              <tr>
+                {headerRow.map((cell, cIdx) => (
+                  <th
+                    key={cIdx}
+                    className="px-3 py-2 text-left font-semibold text-zinc-900 dark:text-zinc-100 text-[11px]"
+                  >
+                    {formatInlineMarkdown(cell)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 bg-white dark:bg-zinc-950">
+              {dataRows.map((row, rIdx) => (
+                <tr key={rIdx} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50">
+                  {row.map((cell, cIdx) => (
+                    <td key={cIdx} className="px-3 py-2 text-zinc-700 dark:text-zinc-300">
+                      {formatInlineMarkdown(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
       continue;
     }
 
