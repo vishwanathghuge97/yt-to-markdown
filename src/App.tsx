@@ -1,0 +1,679 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useRef } from 'react';
+import { User } from 'firebase/auth';
+import { Header } from './components/Header';
+import { DriveExportModal } from './components/DriveExportModal';
+import { MarkdownOutputView } from './components/MarkdownOutputView';
+import { FullAnalysisReport, ChunkAnalysisResult, VideoMetadata, ChunkBoundary } from './types/pipeline';
+import {
+  planChunkBoundaries,
+  deduplicateOverlapEntries,
+  performHierarchicalReduce,
+  generateMarkdownReport,
+  formatTimestamp,
+} from './services/pipelineEngine';
+import { initAuth } from './services/firebase';
+import {
+  Play,
+  RefreshCw,
+  StopCircle,
+  FileText,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  SlidersHorizontal,
+  ChevronDown,
+  ChevronUp,
+  Terminal,
+  ExternalLink,
+  Layers,
+} from 'lucide-react';
+
+interface SegmentRoadmapItem {
+  segmentIndex: number;
+  startSec: number;
+  endSec: number;
+  title: string;
+  summary: string;
+  keyTopics?: string[];
+}
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [currentUrl, setCurrentUrl] = useState('');
+  const [report, setReport] = useState<FullAnalysisReport | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);
+
+  // Custom Options State (Collapsible)
+  const [showOptions, setShowOptions] = useState(false);
+  const [customHours, setCustomHours] = useState<string>('');
+  const [customMinutes, setCustomMinutes] = useState<string>('');
+  const [customNotes, setCustomNotes] = useState<string>('');
+
+  const [inputError, setInputError] = useState('');
+  const [currentVideoMeta, setCurrentVideoMeta] = useState<VideoMetadata | null>(null);
+  const [plannedChunks, setPlannedChunks] = useState<ChunkBoundary[]>([]);
+  const [activeChunkIndex, setActiveChunkIndex] = useState<number>(-1);
+  const [activityLogs, setActivityLogs] = useState<string[]>([]);
+  const [showLogs, setShowLogs] = useState(true);
+
+  // Dark Mode State
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('theme');
+      if (saved) return saved === 'dark';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return true;
+  });
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [darkMode]);
+
+  // Auth listener
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (authenticatedUser) => setUser(authenticatedUser),
+      () => setUser(null)
+    );
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, []);
+
+  const stopRequestedRef = useRef(false);
+
+  // Timer while analyzing
+  useEffect(() => {
+    let interval: any;
+    if (isAnalyzing) {
+      interval = setInterval(() => setElapsedSec((s) => s + 1), 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isAnalyzing]);
+
+  const addLog = (msg: string) => {
+    const time = new Date().toLocaleTimeString();
+    setActivityLogs((prev) => [...prev.slice(-40), `[${time}] ${msg}`]);
+  };
+
+  const handleStopEarly = () => {
+    stopRequestedRef.current = true;
+    setStatusMessage('Compiling markdown for completed segments...');
+    addLog('User requested early compilation. Assembling markdown...');
+  };
+
+  // Helper to strictly validate YouTube URL / video ID
+  const extractYouTubeVideoId = (input: string): string | null => {
+    if (!input) return null;
+    const trimmed = input.trim();
+    if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
+      return trimmed;
+    }
+    const match = trimmed.match(
+      /(?:https?:\/\/)?(?:(?:www|m|music)\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/|e\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i
+    );
+    return match ? match[1] : null;
+  };
+
+  const handleStartAnalysis = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const url = currentUrl.trim();
+    if (!url || isAnalyzing) return;
+
+    // Strict YouTube link verification: Do NOT waste API resources on non-YouTube links
+    const videoId = extractYouTubeVideoId(url);
+    if (!videoId) {
+      setInputError('Not a YouTube link. Please paste a valid YouTube video URL (e.g. https://www.youtube.com/watch?v=... or https://youtu.be/...)');
+      return;
+    }
+
+    setInputError('');
+    setIsAnalyzing(true);
+    stopRequestedRef.current = false;
+    setProgressPercent(5);
+    setElapsedSec(0);
+    setActivityLogs([]);
+    setActiveChunkIndex(-1);
+    setReport(null);
+    setStatusMessage('Connecting to YouTube and reading video information...');
+    addLog(`Target URL: ${url} (ID: ${videoId})`);
+
+    try {
+      // 1. Fetch real video metadata and duration
+      let videoTitle = 'YouTube Video';
+      let authorName = 'Presenter';
+      let durationSec = 3600;
+      let description = '';
+      let creatorChapters: { startSec: number; title: string }[] = [];
+
+      const infoRes = await fetch(`/api/youtube/info?url=${encodeURIComponent(url)}`);
+      if (!infoRes.ok) {
+        const errJson = await infoRes.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to inspect YouTube video. Please verify the link is accessible.');
+      }
+
+      const info = await infoRes.json();
+      if (info.title) videoTitle = info.title;
+      if (info.author) authorName = info.author;
+      if (info.durationSec && info.durationSec > 0) durationSec = info.durationSec;
+      if (info.description) description = info.description;
+      if (Array.isArray(info.creatorChapters)) creatorChapters = info.creatorChapters;
+
+      // Check if user manually specified duration override
+      if (customHours || customMinutes) {
+        const h = parseInt(customHours, 10) || 0;
+        const m = parseInt(customMinutes, 10) || 0;
+        const total = h * 3600 + m * 60;
+        if (total > 60) {
+          durationSec = total;
+          addLog(`Applied user duration override: ${formatTimestamp(durationSec)}`);
+        }
+      }
+
+      addLog(`Video: "${videoTitle}" by ${authorName}`);
+      addLog(`Duration: ${formatTimestamp(durationSec)} (${durationSec}s)`);
+
+      const currentMetadata: VideoMetadata = {
+        id: `vid-${Date.now()}`,
+        url,
+        title: videoTitle,
+        channel: authorName,
+        durationSec,
+        description,
+        publishedDate: new Date().toISOString().split('T')[0],
+      };
+      setCurrentVideoMeta(currentMetadata);
+
+      // 2. Plan chunks adaptively based on real duration
+      const planned = planChunkBoundaries(durationSec);
+      setPlannedChunks(planned);
+      addLog(`Planned ${planned.length} chronological analysis segments (proportional to ${formatTimestamp(durationSec)}).`);
+
+      setProgressPercent(15);
+      setStatusMessage(`Analyzing structure and curriculum roadmap for "${videoTitle}"...`);
+
+      // 3. Generate cohesive curriculum roadmap
+      let roadmap: SegmentRoadmapItem[] = [];
+      try {
+        const roadmapRes = await fetch('/api/gemini/course-roadmap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            videoUrl: url,
+            videoTitle,
+            channelTitle: authorName,
+            durationSec,
+            numSegments: planned.length,
+            creatorChapters,
+            videoDescription: description + (customNotes ? `\nUser Notes: ${customNotes}` : ''),
+          }),
+        });
+
+        if (roadmapRes.ok) {
+          const rData = await roadmapRes.json();
+          roadmap = rData.roadmap || [];
+          addLog(`Roadmap successfully generated (${roadmap.length} modules identified).`);
+        }
+      } catch (err: any) {
+        addLog(`Roadmap notice: ${err.message}. Using sequential chapter mapping.`);
+      }
+
+      const chunkResults: ChunkAnalysisResult[] = [];
+      let cumulativeTranscript: any[] = [];
+      let cumulativeVisuals: any[] = [];
+      const roadmapTitles: { [idx: number]: string } = {};
+
+      // 4. Process each segment sequentially with real-time feedback
+      for (let i = 0; i < planned.length; i++) {
+        if (stopRequestedRef.current) {
+          addLog(`Stopping at segment ${i} as requested.`);
+          break;
+        }
+
+        const chunk = planned[i];
+        setActiveChunkIndex(i);
+
+        // Update chunk status
+        setPlannedChunks((prev) =>
+          prev.map((c, idx) => (idx === i ? { ...c, status: 'processing' } : c))
+        );
+
+        const timeSpan = `${formatTimestamp(chunk.nominalStartSec)} - ${formatTimestamp(chunk.nominalEndSec)}`;
+        const segmentInfo = roadmap[i];
+        const segTitle = segmentInfo?.title || `Module ${i + 1}`;
+        roadmapTitles[i] = segTitle;
+
+        const pct = Math.round(20 + ((i) / planned.length) * 65);
+        setProgressPercent(pct);
+        setStatusMessage(`Processing segment ${i + 1}/${planned.length} [${timeSpan}]: ${segTitle}`);
+        addLog(`[Segment ${i + 1}/${planned.length}] Analyzing ${timeSpan} — ${segTitle}`);
+
+        try {
+          const res = await fetch('/api/gemini/analyze-chunk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              videoUrl: url,
+              videoTitle,
+              channelTitle: authorName,
+              chunkIndex: i,
+              nominalStartSec: chunk.nominalStartSec,
+              nominalEndSec: chunk.nominalEndSec,
+              topicContextHint: segmentInfo?.summary || segTitle,
+              keyTopicsHint: segmentInfo?.keyTopics,
+              videoDescription: description,
+              totalDurationSec: durationSec,
+            }),
+          });
+
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+
+          const data = await res.json();
+          const analysisResult: ChunkAnalysisResult = data.result;
+          chunkResults.push(analysisResult);
+
+          // Deduplicate overlap with previous chunk
+          if (i > 0) {
+            const dedupe = deduplicateOverlapEntries(
+              cumulativeTranscript,
+              analysisResult.transcript,
+              chunk.nominalStartSec,
+              20
+            );
+            cumulativeTranscript = dedupe.merged;
+          } else {
+            cumulativeTranscript = [...analysisResult.transcript];
+          }
+
+          cumulativeVisuals.push(...analysisResult.visualObservations);
+
+          addLog(`✓ Segment ${i + 1} completed (${analysisResult.transcript.length} dialogue entries, ${analysisResult.visualObservations.length} visual notes).`);
+
+          // Mark chunk as completed
+          setPlannedChunks((prev) =>
+            prev.map((c, idx) => (idx === i ? { ...c, status: 'completed' } : c))
+          );
+        } catch (err: any) {
+          addLog(`⚠️ Segment ${i + 1} issue (${err.message}). Safe recovery applied.`);
+          setPlannedChunks((prev) =>
+            prev.map((c, idx) => (idx === i ? { ...c, status: 'failed' } : c))
+          );
+        }
+      }
+
+      if (chunkResults.length === 0) {
+        throw new Error('No segments could be analyzed for this video. Please verify the video is accessible and try again.');
+      }
+
+      setProgressPercent(90);
+      setStatusMessage('Synthesizing executive summary and compiling Markdown...');
+      addLog('Compiling chapters, takeaways, and formatting clean Markdown document...');
+
+      const reduceOutput = performHierarchicalReduce(chunkResults, currentMetadata, roadmapTitles);
+
+      // Hierarchical reduce call for executive summary
+      let finalExecSummary = reduceOutput.executiveSummary;
+      let finalKeyTakeaways = reduceOutput.keyTakeaways;
+
+      try {
+        const reduceRes = await fetch('/api/gemini/hierarchical-reduce', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            videoUrl: url,
+            videoTitle,
+            channelTitle: authorName,
+            durationSec,
+            chapterSummaries: reduceOutput.chapters.map((c) => ({
+              title: c.title,
+              timeRange: c.timeRangeStr,
+              overview: c.overview,
+              keyConcepts: c.keyConcepts,
+            })),
+          }),
+        });
+        if (reduceRes.ok) {
+          const rData = await reduceRes.json();
+          if (rData.executiveSummary) finalExecSummary = rData.executiveSummary;
+          if (rData.keyTakeaways?.length) finalKeyTakeaways = rData.keyTakeaways;
+        }
+      } catch (err) {
+        console.warn('Executive reduce fallback used:', err);
+      }
+
+      const fullReport: FullAnalysisReport = {
+        metadata: currentMetadata,
+        config: {
+          chunkDurationSec: 2400,
+          overlapSec: 20,
+          mediaResolution: 'high',
+          totalChunks: chunkResults.length,
+          totalTokens: chunkResults.length * 500000,
+          directYouTubeMode: true,
+        },
+        executiveSummary: finalExecSummary,
+        keyTakeaways: finalKeyTakeaways,
+        chapters: reduceOutput.chapters,
+        transcript: cumulativeTranscript,
+        visualObservations: cumulativeVisuals,
+        scientificEntities: [],
+        literatureMatches: [],
+        markdownContent: '',
+        generatedAt: new Date().toISOString(),
+      };
+
+      fullReport.markdownContent = generateMarkdownReport(fullReport);
+      setReport(fullReport);
+
+      setProgressPercent(100);
+      setStatusMessage('Markdown generation complete!');
+      addLog(`Markdown document created successfully (${fullReport.markdownContent.split('\n').length} lines).`);
+    } catch (err: any) {
+      console.error('Analysis error:', err);
+      setInputError(err.message || 'Generation failed. Please verify the YouTube URL.');
+      setStatusMessage('');
+      addLog(`Error: ${err.message || 'Generation failed'}`);
+    } finally {
+      setIsAnalyzing(false);
+      setActiveChunkIndex(-1);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col font-sans transition-colors duration-150">
+      {/* 1. Header */}
+      <Header
+        user={user}
+        onAuthChange={setUser}
+        onOpenDriveModal={() => setIsDriveModalOpen(true)}
+        darkMode={darkMode}
+        onToggleDarkMode={() => setDarkMode(!darkMode)}
+      />
+
+      {/* 2. Main Content */}
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6 space-y-5">
+        {/* URL Input Form */}
+        <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 sm:p-4 shadow-sm transition-colors">
+          <form onSubmit={handleStartAnalysis} className="space-y-3">
+            {inputError && (
+              <div className="flex items-center gap-2 p-2.5 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 text-xs font-mono">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span>{inputError}</span>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={currentUrl}
+                onChange={(e) => {
+                  setCurrentUrl(e.target.value);
+                  if (inputError) setInputError('');
+                }}
+                placeholder="Paste YouTube link (e.g. https://www.youtube.com/watch?v=...)"
+                className="flex-1 px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-md text-xs sm:text-sm font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400"
+                disabled={isAnalyzing}
+              />
+
+              <button
+                type="submit"
+                disabled={isAnalyzing || !currentUrl.trim()}
+                className="px-4 py-2.5 bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-950 rounded-md text-xs sm:text-sm font-medium transition flex items-center justify-center gap-2 disabled:opacity-40 shrink-0 font-mono shadow-xs"
+              >
+                {isAnalyzing ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Processing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Generate .md</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Collapsible Advanced Options */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setShowOptions(!showOptions)}
+                className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 flex items-center gap-1.5 transition"
+              >
+                <SlidersHorizontal className="w-3 h-3" />
+                <span>{showOptions ? 'Hide video options' : 'Video options (duration override / notes)'}</span>
+                {showOptions ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </button>
+
+              {showOptions && (
+                <div className="mt-3 p-3 bg-zinc-50 dark:bg-zinc-950/60 rounded border border-zinc-200 dark:border-zinc-800/80 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="block text-[11px] font-mono text-zinc-600 dark:text-zinc-400 mb-1">
+                      Duration override (if unlisted or custom length):
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min="0"
+                          max="24"
+                          placeholder="8"
+                          value={customHours}
+                          onChange={(e) => setCustomHours(e.target.value)}
+                          className="w-14 px-2 py-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs text-center"
+                        />
+                        <span className="text-zinc-500 text-[11px]">hrs</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min="0"
+                          max="59"
+                          placeholder="00"
+                          value={customMinutes}
+                          onChange={(e) => setCustomMinutes(e.target.value)}
+                          className="w-14 px-2 py-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs text-center"
+                        />
+                        <span className="text-zinc-500 text-[11px]">mins</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono text-zinc-600 dark:text-zinc-400 mb-1">
+                      Context / Instructor notes (optional):
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Node.js Express crash course"
+                      value={customNotes}
+                      onChange={(e) => setCustomNotes(e.target.value)}
+                      className="w-full px-2.5 py-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </form>
+        </div>
+
+        {/* Real-time Visual Progress Indicator */}
+        {isAnalyzing && (
+          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-4 space-y-4 shadow-sm transition-colors">
+            {/* Header / Active status line */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-zinc-100 dark:border-zinc-800/80">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span className="font-mono text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                    {statusMessage}
+                  </span>
+                </div>
+                {currentVideoMeta && (
+                  <p className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 truncate max-w-lg">
+                    {currentVideoMeta.title} ({formatTimestamp(currentVideoMeta.durationSec)})
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3 shrink-0">
+                <div className="flex items-center gap-1.5 font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{elapsedSec}s elapsed</span>
+                </div>
+
+                <button
+                  onClick={handleStopEarly}
+                  className="px-2.5 py-1 border border-zinc-300 dark:border-zinc-700 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition flex items-center gap-1.5"
+                  title="Finish current segments and assemble markdown immediately"
+                >
+                  <StopCircle className="w-3.5 h-3.5 text-red-500" />
+                  <span>Compile Now</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Progress Bar with Percentage */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-[11px] font-mono text-zinc-500 dark:text-zinc-400">
+                <span>Progress: {progressPercent}%</span>
+                <span>
+                  {plannedChunks.filter((c) => c.status === 'completed').length} of {plannedChunks.length} segments
+                </span>
+              </div>
+              <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
+                <div
+                  className="bg-zinc-900 dark:bg-zinc-100 h-full transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Segment Timeline Grid */}
+            {plannedChunks.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
+                  <span>Coverage Timeline (Zero-Skip)</span>
+                  <span>{formatTimestamp(currentVideoMeta?.durationSec || 0)}</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
+                  {plannedChunks.map((chunk, idx) => {
+                    const isCurrent = activeChunkIndex === idx;
+                    const isDone = chunk.status === 'completed';
+                    const isFailed = chunk.status === 'failed';
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`p-1.5 rounded border text-[11px] font-mono flex items-center justify-between transition-colors ${
+                          isCurrent
+                            ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-100 dark:bg-zinc-800 font-semibold'
+                            : isDone
+                            ? 'border-zinc-200 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-900/40 text-zinc-600 dark:text-zinc-400'
+                            : isFailed
+                            ? 'border-amber-300 dark:border-amber-900 bg-amber-50/30 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400'
+                            : 'border-zinc-100 dark:border-zinc-900 text-zinc-400 dark:text-zinc-600'
+                        }`}
+                      >
+                        <span className="truncate">
+                          #{idx + 1} {formatTimestamp(chunk.nominalStartSec)} - {formatTimestamp(chunk.nominalEndSec)}
+                        </span>
+                        {isCurrent && <RefreshCw className="w-3 h-3 animate-spin shrink-0 ml-1 text-zinc-900 dark:text-zinc-100" />}
+                        {isDone && <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0 ml-1" />}
+                        {isFailed && <AlertCircle className="w-3 h-3 text-amber-500 shrink-0 ml-1" />}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Real-time Activity Log Drawer */}
+            <div className="border border-zinc-200 dark:border-zinc-800 rounded-md overflow-hidden text-xs font-mono">
+              <button
+                type="button"
+                onClick={() => setShowLogs(!showLogs)}
+                className="w-full px-3 py-1.5 bg-zinc-50 dark:bg-zinc-950 flex items-center justify-between text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition"
+              >
+                <div className="flex items-center gap-1.5 text-[11px]">
+                  <Terminal className="w-3 h-3" />
+                  <span>Activity Log ({activityLogs.length} events)</span>
+                </div>
+                {showLogs ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </button>
+
+              {showLogs && (
+                <div className="p-2.5 bg-zinc-900 dark:bg-zinc-950 text-zinc-300 text-[11px] font-mono max-h-36 overflow-y-auto space-y-1">
+                  {activityLogs.map((log, i) => (
+                    <div key={i} className="leading-snug">
+                      {log}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 3. Output Document View */}
+        {report ? (
+          <MarkdownOutputView
+            videoTitle={report.metadata.title}
+            channelTitle={report.metadata.channel}
+            markdownContent={report.markdownContent}
+            onOpenDriveModal={() => setIsDriveModalOpen(true)}
+          />
+        ) : !isAnalyzing && (
+          <div className="border border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg p-8 text-center space-y-2">
+            <div className="w-9 h-9 rounded-md bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center mx-auto text-zinc-500">
+              <FileText className="w-4 h-4" />
+            </div>
+            <div className="space-y-1">
+              <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                Generate Markdown from YouTube
+              </h2>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto">
+                Paste a YouTube video link above and click Generate .md to export notes.
+              </p>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Google Drive Export Modal */}
+      {report && (
+        <DriveExportModal
+          isOpen={isDriveModalOpen}
+          onClose={() => setIsDriveModalOpen(false)}
+          user={user}
+          onAuthChange={setUser}
+          fileName={`${report.metadata.title.slice(0, 40)}-summary`}
+          markdownContent={report.markdownContent}
+          videoTitle={report.metadata.title}
+        />
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,8 @@
+{
+  "name": "OmniScribe Science - YouTube Video Transcriber & Summarizer",
+  "description": "Zero-skip multimodal YouTube video and lecture analyzer with visual frame OCR, scientific literature synthesis, and Google Drive export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
