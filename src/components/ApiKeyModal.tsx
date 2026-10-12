@@ -5,8 +5,9 @@ interface ApiKeyModalProps {
   isOpen: boolean;
   onClose: () => void;
   apiKey: string;
-  onSaveKey: (key: string) => void;
+  onSaveKey: (key: string, persist: boolean) => void;
   hasEnvKey: boolean;
+  initialPersist?: boolean;
 }
 
 export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
@@ -15,25 +16,28 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
   apiKey,
   onSaveKey,
   hasEnvKey,
+  initialPersist = true,
 }) => {
   const [inputVal, setInputVal] = useState(apiKey);
   const [showKey, setShowKey] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [persistLocally, setPersistLocally] = useState(initialPersist);
 
   // Sync state when opened
   React.useEffect(() => {
     if (isOpen) {
       setInputVal(apiKey);
       setSavedSuccess(false);
+      setPersistLocally(initialPersist);
     }
-  }, [isOpen, apiKey]);
+  }, [isOpen, apiKey, initialPersist]);
 
   if (!isOpen) return null;
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     const clean = inputVal.trim();
-    onSaveKey(clean);
+    onSaveKey(clean, persistLocally);
     setSavedSuccess(true);
     setTimeout(() => {
       onClose();
@@ -42,7 +46,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
 
   const handleClear = () => {
     setInputVal('');
-    onSaveKey('');
+    onSaveKey('', false);
   };
 
   return (
@@ -75,15 +79,18 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         <form onSubmit={handleSave} className="p-5 space-y-4">
           <div className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed space-y-2">
             <p>
-              To protect server quotas, <strong>each visitor must provide their own Gemini API key</strong>.
+              To protect server quotas, <strong>each visitor uses their own Gemini API key</strong>.
             </p>
-            <p>
-              Your key stays <strong>strictly in your browser's local storage</strong> and is sent only with your own requests. It is never saved in any database or shared with anyone.
-            </p>
-            <p className="text-[11px] text-zinc-500 dark:text-zinc-500 flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-              <span>Google AI Studio free tier provides 15 requests/min at no cost.</span>
-            </p>
+            <div className="bg-zinc-50 dark:bg-zinc-950 p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-800 space-y-1.5">
+              <div className="flex items-center gap-1.5 font-semibold text-zinc-800 dark:text-zinc-200">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                <span>How your key is kept safe:</span>
+              </div>
+              <ul className="list-disc list-inside space-y-1 text-[11px] text-zinc-500 dark:text-zinc-400 pl-1">
+                <li><strong>Browser Sandbox:</strong> Other websites (like Facebook, Google, other tabs) cannot read data saved on this domain due to browser Same-Origin isolation.</li>
+                <li><strong>Never Logged or Stored:</strong> Your key is never written to any database, file, or server log.</li>
+              </ul>
+            </div>
           </div>
 
           <div>
@@ -106,6 +113,42 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
               >
                 {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
               </button>
+            </div>
+          </div>
+
+          {/* Storage Mode Choice */}
+          <div className="space-y-1.5 pt-1">
+            <label className="block text-[11px] font-mono text-zinc-600 dark:text-zinc-400">
+              Storage Preference:
+            </label>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <label className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition ${!persistLocally ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-100/70 dark:bg-zinc-800/60 font-medium text-zinc-900 dark:text-zinc-100' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/40'}`}>
+                <input
+                  type="radio"
+                  name="storage_mode"
+                  checked={!persistLocally}
+                  onChange={() => setPersistLocally(false)}
+                  className="mt-0.5"
+                />
+                <div className="text-[11px] leading-tight">
+                  <div className="font-semibold text-zinc-800 dark:text-zinc-200">Session Only</div>
+                  <div className="text-[10px] text-zinc-500">Erased when tab closes (Most secure)</div>
+                </div>
+              </label>
+
+              <label className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition ${persistLocally ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-100/70 dark:bg-zinc-800/60 font-medium text-zinc-900 dark:text-zinc-100' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/40'}`}>
+                <input
+                  type="radio"
+                  name="storage_mode"
+                  checked={persistLocally}
+                  onChange={() => setPersistLocally(true)}
+                  className="mt-0.5"
+                />
+                <div className="text-[11px] leading-tight">
+                  <div className="font-semibold text-zinc-800 dark:text-zinc-200">Remember</div>
+                  <div className="text-[10px] text-zinc-500">Saved on this device only</div>
+                </div>
+              </label>
             </div>
           </div>
 

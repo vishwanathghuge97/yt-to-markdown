@@ -56,18 +56,33 @@ export default function App() {
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
   const [customApiKey, setCustomApiKey] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('gemini_custom_api_key') || '';
+      return localStorage.getItem('gemini_custom_api_key') || sessionStorage.getItem('gemini_custom_api_key') || '';
     }
     return '';
   });
 
-  const handleSaveApiKey = (key: string) => {
+  const [isPersistedLocally, setIsPersistedLocally] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return !!localStorage.getItem('gemini_custom_api_key');
+    }
+    return true;
+  });
+
+  const handleSaveApiKey = (key: string, persist: boolean) => {
     setCustomApiKey(key);
+    setIsPersistedLocally(persist);
     if (typeof window !== 'undefined') {
       if (key) {
-        localStorage.setItem('gemini_custom_api_key', key);
+        if (persist) {
+          localStorage.setItem('gemini_custom_api_key', key);
+          sessionStorage.removeItem('gemini_custom_api_key');
+        } else {
+          sessionStorage.setItem('gemini_custom_api_key', key);
+          localStorage.removeItem('gemini_custom_api_key');
+        }
       } else {
         localStorage.removeItem('gemini_custom_api_key');
+        sessionStorage.removeItem('gemini_custom_api_key');
       }
     }
   };
@@ -454,6 +469,7 @@ export default function App() {
         apiKey={customApiKey}
         onSaveKey={handleSaveApiKey}
         hasEnvKey={true}
+        initialPersist={isPersistedLocally}
       />
 
       {/* 2. Main Content */}
