@@ -198,18 +198,38 @@ export default function App() {
       let description = '';
       let creatorChapters: { startSec: number; title: string }[] = [];
 
-      const infoRes = await fetch(`/api/youtube/info?url=${encodeURIComponent(url)}`);
-      if (!infoRes.ok) {
-        const errJson = await infoRes.json().catch(() => ({}));
-        throw new Error(errJson.error || 'Failed to inspect YouTube video. Please verify the link is accessible.');
+      try {
+        const infoRes = await fetch(`/api/youtube/info?url=${encodeURIComponent(url)}`);
+        if (infoRes.ok) {
+          const info = await infoRes.json();
+          if (info.title) videoTitle = info.title;
+          if (info.author) authorName = info.author;
+          if (info.durationSec && info.durationSec > 0) durationSec = info.durationSec;
+          if (info.description) description = info.description;
+          if (Array.isArray(info.creatorChapters)) creatorChapters = info.creatorChapters;
+        } else {
+          throw new Error('Backend inspect returned non-200');
+        }
+      } catch (backendErr) {
+        addLog('Server inspection notice: Trying direct YouTube oEmbed fallback...');
+        // Resilient fallback: Query YouTube official oEmbed directly from browser
+        try {
+          const oembedRes = await fetch(
+            `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}&format=json`
+          );
+          if (oembedRes.ok) {
+            const odata = await oembedRes.json();
+            if (odata.title) videoTitle = odata.title;
+            if (odata.author_name) authorName = odata.author_name;
+            durationSec = 600; // default 10 minutes
+            addLog(`Direct oEmbed resolved: "${videoTitle}" by ${authorName}`);
+          } else {
+            videoTitle = `YouTube Video (${videoId})`;
+          }
+        } catch {
+          videoTitle = `YouTube Video (${videoId})`;
+        }
       }
-
-      const info = await infoRes.json();
-      if (info.title) videoTitle = info.title;
-      if (info.author) authorName = info.author;
-      if (info.durationSec && info.durationSec > 0) durationSec = info.durationSec;
-      if (info.description) description = info.description;
-      if (Array.isArray(info.creatorChapters)) creatorChapters = info.creatorChapters;
 
       addLog(`Video: "${videoTitle}" by ${authorName}`);
       addLog(`Duration: ${formatTimestamp(durationSec)} (${durationSec}s)`);
