@@ -21,7 +21,6 @@ import { initAuth } from './services/firebase';
 import {
   Play,
   RefreshCw,
-  StopCircle,
   FileText,
   Clock,
   CheckCircle2,
@@ -35,14 +34,10 @@ import {
   X,
 } from 'lucide-react';
 
-interface SegmentRoadmapItem {
-  segmentIndex: number;
-  startSec: number;
-  endSec: number;
-  title: string;
-  summary: string;
-  keyTopics?: string[];
-}
+type AnalysisPhase = 'reading' | 'analyzing' | 'preparing';
+// Vercel allows this function 60 seconds. Keeping the one-request route to
+// short clips avoids a predictable timeout; every longer video uses offsets.
+const SINGLE_PASS_MAX_DURATION_SEC = 10 * 60;
 
 async function apiErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
@@ -64,6 +59,8 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [progressPercent, setProgressPercent] = useState(0);
   const [statusMessage, setStatusMessage] = useState('');
+  const [analysisPhase, setAnalysisPhase] = useState<AnalysisPhase>('reading');
+  const [keyRotationNotice, setKeyRotationNotice] = useState('');
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
@@ -117,7 +114,7 @@ export default function App() {
   const [plannedChunks, setPlannedChunks] = useState<ChunkBoundary[]>([]);
   const [activeChunkIndex, setActiveChunkIndex] = useState<number>(-1);
   const [activityLogs, setActivityLogs] = useState<string[]>([]);
-  const [showLogs, setShowLogs] = useState(true);
+  const [showLogs, setShowLogs] = useState(false);
 
   // Dark Mode State
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -150,8 +147,6 @@ export default function App() {
     };
   }, []);
 
-  const stopRequestedRef = useRef(false);
-
   // Timer while analyzing
   useEffect(() => {
     let interval: any;
@@ -182,16 +177,11 @@ export default function App() {
       const nextIndex = (activeApiKeyIndexRef.current + 1) % customApiKeys.length;
       activeApiKeyIndexRef.current = nextIndex;
       setActiveApiKeyIndex(nextIndex);
+      setKeyRotationNotice(`Switched to backup API key ${nextIndex + 1}`);
       addLog(`API key ${attempt + 1} was rejected or exhausted. Trying key ${nextIndex + 1}...`);
     }
 
     return response as Response;
-  };
-
-  const handleStopEarly = () => {
-    stopRequestedRef.current = true;
-    setStatusMessage('Compiling markdown for completed segments...');
-    addLog('User requested early compilation. Assembling markdown...');
   };
 
   // Helper to strictly validate YouTube URL / video ID
@@ -228,8 +218,9 @@ export default function App() {
 
     setInputError('');
     setIsAnalyzing(true);
-    stopRequestedRef.current = false;
     setProgressPercent(5);
+    setAnalysisPhase('reading');
+    setKeyRotationNotice('');
     setElapsedSec(0);
     setActivityLogs([]);
     setActiveChunkIndex(-1);
@@ -241,7 +232,7 @@ export default function App() {
       // 1. Fetch real video metadata and duration
       let videoTitle = 'YouTube Video';
       let authorName = 'Presenter';
-      let durationSec = 3600;
+      let durationSec = 0;
       let description = '';
       let creatorChapters: { startSec: number; title: string }[] = [];
 
@@ -275,7 +266,6 @@ export default function App() {
             const odata = await oembedRes.json();
             if (odata.title) videoTitle = odata.title;
             if (odata.author_name) authorName = odata.author_name;
-            durationSec = 600; // default 10 minutes
             addLog(`Direct oEmbed resolved: "${videoTitle}" by ${authorName}`);
           } else {
             videoTitle = `YouTube Video (${videoId})`;
@@ -283,6 +273,10 @@ export default function App() {
         } catch {
           videoTitle = `YouTube Video (${videoId})`;
         }
+      }
+
+      if (!durationSec || durationSec <= 0) {
+        throw new Error('Could not determine this video’s duration. No Gemini analysis was started, so your API quota was not used. Please retry.');
       }
 
       addLog(`Video: "${videoTitle}" by ${authorName}`);
@@ -305,15 +299,13 @@ export default function App() {
 
       let generatedReport: FullAnalysisReport | null = null;
 
-      // 3. Fast Unified Generation (Single-pass, 10-15s total)
-      try {
+      // Short videos need one grounded request. Longer videos go directly to
+      // native Gemini time windows below; never analyze the entire video first.
+      if (durationSec <= SINGLE_PASS_MAX_DURATION_SEC) try {
+        setAnalysisPhase('analyzing');
         setProgressPercent(25);
         setStatusMessage(`Generating structured notes & Markdown for "${videoTitle}"...`);
         addLog(`Analyzing video stream with Gemini AI (Fast Single-Pass Pipeline)...`);
-
-        const progressInterval = setInterval(() => {
-          setProgressPercent((prev) => (prev < 85 ? prev + 6 : prev));
-        }, 1200);
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 55000);
@@ -322,7 +314,7 @@ export default function App() {
         try {
           fastRes = await requestWithKeyRotation('/api/gemini/generate-full-notes', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             signal: controller.signal,
             body: JSON.stringify({
               videoUrl: url,
@@ -335,7 +327,6 @@ export default function App() {
           });
         } finally {
           clearTimeout(timeoutId);
-          clearInterval(progressInterval);
         }
 
         if (fastRes && !fastRes.ok) {
@@ -350,6 +341,7 @@ export default function App() {
           const r = fastData.result || {};
 
           if (r.executiveSummary || (Array.isArray(r.chapters) && r.chapters.length > 0)) {
+            setAnalysisPhase('preparing');
             setProgressPercent(85);
             setStatusMessage('Compiling final Markdown document...');
 
@@ -431,7 +423,7 @@ export default function App() {
         }
       } catch (fastErr: any) {
         if (fastErr?.stopFallback) throw fastErr;
-        addLog(`Fast pass notice: ${fastErr.message}. Running fallback chapter analysis...`);
+        throw new Error(`Full-video analysis did not finish: ${fastErr.message}. No fallback calls were made, so your API quota was not spent on duplicate analysis.`);
       }
 
       // If fast pass succeeded, set report immediately!
@@ -443,36 +435,10 @@ export default function App() {
         return;
       }
 
-      // Fallback: Multi-segment analysis
-      addLog(`Planned ${planned.length} chronological analysis segments (proportional to ${formatTimestamp(durationSec)}).`);
+      addLog(`Planned ${planned.length} Gemini video windows (proportional to ${formatTimestamp(durationSec)}).`);
+      setAnalysisPhase('analyzing');
       setProgressPercent(15);
-      setStatusMessage(`Analyzing structure and curriculum roadmap for "${videoTitle}"...`);
-
-      let roadmap: SegmentRoadmapItem[] = [];
-
-      try {
-        const roadmapRes = await requestWithKeyRotation('/api/gemini/course-roadmap', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            videoUrl: url,
-            videoTitle,
-            channelTitle: authorName,
-            durationSec,
-            numSegments: planned.length,
-            creatorChapters,
-            videoDescription: description,
-          }),
-        });
-
-        if (roadmapRes.ok) {
-          const rData = await roadmapRes.json();
-          roadmap = rData.roadmap || [];
-          addLog(`Roadmap successfully generated (${roadmap.length} modules identified).`);
-        }
-      } catch (err: any) {
-        addLog(`Roadmap notice: ${err.message}. Using sequential chapter mapping.`);
-      }
+      setStatusMessage(`Preparing ${planned.length} video windows for analysis...`);
 
       const chunkResults: ChunkAnalysisResult[] = [];
       let cumulativeTranscript: any[] = [];
@@ -481,11 +447,6 @@ export default function App() {
 
       // 4. Process each segment sequentially with real-time feedback
       for (let i = 0; i < planned.length; i++) {
-        if (stopRequestedRef.current) {
-          addLog(`Stopping at segment ${i} as requested.`);
-          break;
-        }
-
         const chunk = planned[i];
         setActiveChunkIndex(i);
 
@@ -495,8 +456,7 @@ export default function App() {
         );
 
         const timeSpan = `${formatTimestamp(chunk.nominalStartSec)} - ${formatTimestamp(chunk.nominalEndSec)}`;
-        const segmentInfo = roadmap[i];
-        const segTitle = segmentInfo?.title || `Module ${i + 1}`;
+        const segTitle = `Part ${i + 1}`;
         roadmapTitles[i] = segTitle;
 
         const pct = Math.round(20 + ((i) / planned.length) * 65);
@@ -515,8 +475,7 @@ export default function App() {
               chunkIndex: i,
               nominalStartSec: chunk.nominalStartSec,
               nominalEndSec: chunk.nominalEndSec,
-              topicContextHint: segmentInfo?.summary || segTitle,
-              keyTopicsHint: segmentInfo?.keyTopics,
+              topicContextHint: segTitle,
               videoDescription: description,
               totalDurationSec: durationSec,
             }),
@@ -574,10 +533,11 @@ export default function App() {
             prev.map((c, idx) => (idx === i ? { ...c, status: 'completed' } : c))
           );
         } catch (err: any) {
-          addLog(`⚠️ Segment ${i + 1} issue (${err.message}). Safe recovery applied.`);
+          addLog(`⚠️ Segment ${i + 1} failed (${err.message}). Stopping to avoid an incomplete result and unnecessary API calls.`);
           setPlannedChunks((prev) =>
             prev.map((c, idx) => (idx === i ? { ...c, status: 'failed' } : c))
           );
+          throw new Error(`Segment ${i + 1} failed: ${err.message}. No incomplete Markdown was generated.`);
         }
       }
 
@@ -585,41 +545,23 @@ export default function App() {
         throw new Error('No segments could be analyzed for this video. Please verify the video is accessible and try again.');
       }
 
+      const failedSegmentCount = planned.length - chunkResults.length;
+      if (failedSegmentCount > 0) {
+        throw new Error(`${failedSegmentCount} video segment${failedSegmentCount === 1 ? '' : 's'} failed. Markdown was not compiled so the result is not incomplete.`);
+      }
+
       setProgressPercent(90);
+      setAnalysisPhase('preparing');
       setStatusMessage('Synthesizing executive summary and compiling Markdown...');
       addLog('Compiling chapters, takeaways, and formatting clean Markdown document...');
 
       const reduceOutput = performHierarchicalReduce(chunkResults, currentMetadata, roadmapTitles);
 
-      // Hierarchical reduce call for executive summary
+      // All evidence was already analyzed in the offset windows. A final
+      // Gemini call would cost quota and add another failure point without
+      // inspecting new material, so compilation stays deterministic.
       let finalExecSummary = reduceOutput.executiveSummary;
       let finalKeyTakeaways = reduceOutput.keyTakeaways;
-
-      try {
-        const reduceRes = await requestWithKeyRotation('/api/gemini/hierarchical-reduce', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            videoUrl: url,
-            videoTitle,
-            channelTitle: authorName,
-            durationSec,
-            chapterSummaries: reduceOutput.chapters.map((c) => ({
-              title: c.title,
-              timeRange: c.timeRangeStr,
-              overview: c.overview,
-              keyConcepts: c.keyConcepts,
-            })),
-          }),
-        });
-        if (reduceRes.ok) {
-          const rData = await reduceRes.json();
-          if (rData.executiveSummary) finalExecSummary = rData.executiveSummary;
-          if (rData.keyTakeaways?.length) finalKeyTakeaways = rData.keyTakeaways;
-        }
-      } catch (err) {
-        console.warn('Executive reduce fallback used:', err);
-      }
 
       const fullReport: FullAnalysisReport = {
         metadata: currentMetadata,
@@ -658,6 +600,18 @@ export default function App() {
       setActiveChunkIndex(-1);
     }
   };
+
+  const isSinglePassAnalysis = isAnalyzing && (
+    statusMessage.startsWith('Generating structured notes') ||
+    statusMessage.startsWith('Compiling final Markdown')
+  );
+  const estimatedWait = currentVideoMeta
+    ? currentVideoMeta.durationSec <= 600
+      ? 'Usually 15–30 seconds'
+      : currentVideoMeta.durationSec <= SINGLE_PASS_MAX_DURATION_SEC
+        ? 'Usually 30–90 seconds'
+        : `About ${plannedChunks.length || 1} video windows; time depends on Gemini availability`
+    : 'Usually under 2 minutes';
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col font-sans transition-colors duration-150">
@@ -706,9 +660,20 @@ export default function App() {
             )}
 
             {inputError && (
-              <div className="flex items-start sm:items-center gap-2 p-2.5 rounded-md bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-300 text-xs font-mono">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5 sm:mt-0" />
-                <span>{inputError}</span>
+              <div className="flex items-start sm:items-center justify-between gap-3 p-2.5 rounded-md bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-300 text-xs font-mono">
+                <div className="flex items-start gap-2 min-w-0">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5 sm:mt-0" />
+                  <span>{inputError}</span>
+                </div>
+                {!isAnalyzing && currentUrl.trim() && (
+                  <button
+                    type="submit"
+                    onClick={() => setInputError('')}
+                    className="shrink-0 px-2.5 py-1.5 rounded border border-rose-300 dark:border-rose-800 bg-white/70 dark:bg-rose-950/50 hover:bg-white dark:hover:bg-rose-900 text-rose-800 dark:text-rose-200 text-[11px] font-semibold transition"
+                  >
+                    Retry
+                  </button>
+                )}
               </div>
             )}
 
@@ -725,6 +690,7 @@ export default function App() {
                   className="w-full pl-3.5 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-md text-base sm:text-sm font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400 min-h-[44px]"
                   disabled={isAnalyzing}
                 />
+                <p className="mt-1.5 text-[11px] font-mono text-zinc-500 dark:text-zinc-400">Long videos are analyzed in timed video windows.</p>
                 
                 {currentUrl && (
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
@@ -781,6 +747,20 @@ export default function App() {
                     {currentVideoMeta.title} ({formatTimestamp(currentVideoMeta.durationSec)})
                   </p>
                 )}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-mono text-zinc-500 dark:text-zinc-400">
+                  {(['reading', 'analyzing', 'preparing'] as AnalysisPhase[]).map((phase, index) => {
+                    const labels = ['Reading video', 'Analyzing', 'Preparing Markdown'];
+                    const phaseOrder = { reading: 0, analyzing: 1, preparing: 2 };
+                    const active = phaseOrder[analysisPhase] === index;
+                    const complete = phaseOrder[analysisPhase] > index;
+                    return (
+                      <span key={phase} className={active ? 'text-zinc-900 dark:text-zinc-100 font-semibold' : complete ? 'text-emerald-600 dark:text-emerald-400' : ''}>
+                        {complete ? '✓ ' : `${index + 1}. `}{labels[index]}
+                      </span>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500">Estimated wait: {estimatedWait}</p>
               </div>
 
               <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-zinc-100 dark:border-zinc-800/60">
@@ -789,35 +769,33 @@ export default function App() {
                   <span>{elapsedSec}s elapsed</span>
                 </div>
 
-                <button
-                  onClick={handleStopEarly}
-                  className="px-2.5 py-1.5 min-h-[36px] sm:min-h-0 border border-zinc-300 dark:border-zinc-700 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition flex items-center gap-1.5 touch-manipulation active:scale-95"
-                  title="Finish current segments and assemble markdown immediately"
-                >
-                  <StopCircle className="w-3.5 h-3.5 text-red-500" />
-                  <span>Compile Now</span>
-                </button>
               </div>
             </div>
 
-            {/* Progress Bar with Percentage */}
+            {keyRotationNotice && (
+              <div className="px-3 py-2 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 text-[11px] font-mono">
+                {keyRotationNotice}
+              </div>
+            )}
+
+            {/* Progress Bar */}
             <div className="space-y-1.5">
               <div className="flex justify-between text-[11px] font-mono text-zinc-500 dark:text-zinc-400">
-                <span>Progress: {progressPercent}%</span>
-                <span>
-                  {plannedChunks.filter((c) => c.status === 'completed').length} of {plannedChunks.length} segments
-                </span>
+                <span>{isSinglePassAnalysis ? 'Analyzing video and building notes' : `Progress: ${progressPercent}%`}</span>
+                {!isSinglePassAnalysis && activeChunkIndex >= 0 && (
+                  <span>{plannedChunks.filter((c) => c.status === 'completed').length} of {plannedChunks.length} segments</span>
+                )}
               </div>
               <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
                 <div
-                  className="bg-zinc-900 dark:bg-zinc-100 h-full transition-all duration-300"
-                  style={{ width: `${progressPercent}%` }}
+                  className={`bg-zinc-900 dark:bg-zinc-100 h-full transition-all duration-300 ${isSinglePassAnalysis ? 'w-1/3 animate-pulse' : ''}`}
+                  style={isSinglePassAnalysis ? undefined : { width: `${progressPercent}%` }}
                 />
               </div>
             </div>
 
             {/* Segment Timeline Grid */}
-            {plannedChunks.length > 0 && (
+            {!isSinglePassAnalysis && activeChunkIndex >= 0 && plannedChunks.length > 0 && (
               <div className="space-y-1.5">
                 <div className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
                   <span>Coverage Timeline (Zero-Skip)</span>
@@ -864,7 +842,7 @@ export default function App() {
               >
                 <div className="flex items-center gap-1.5 text-xs">
                   <Terminal className="w-3.5 h-3.5" />
-                  <span>Activity Log ({activityLogs.length} events)</span>
+                  <span>Details ({activityLogs.length} events)</span>
                 </div>
                 {showLogs ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
               </button>

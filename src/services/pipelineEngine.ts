@@ -67,17 +67,9 @@ export function calculateTokenBudget(
 }
 
 /**
- * Plans chunk boundaries proportionally tailored to the video duration.
- * - Under 3 minutes: Exactly 1 concise chunk
- * - 3 to 10 minutes: 1 to 2 chunks
- * - 10 to 30 minutes: 2 to 3 chunks
- * - 30 to 60 minutes: 3 to 4 chunks
- * - 1 to 2 hours: 4 to 5 chunks
- * - 2 to 4 hours: 5 to 6 chunks
- * - 4 to 8 hours: 6 to 8 chunks
- * - 8+ hours: 8 to 12 chunks
- * This ensures small videos produce appropriately compact, focused markdown files,
- * while large multi-hour courses receive comprehensive deep-dives.
+ * Plans real Gemini video windows. Once a video is too large for one request,
+ * the window size grows gently with duration to avoid both giant requests and
+ * a needless explosion in API calls.
  */
 export function planChunkBoundaries(
   totalDurationSec: number,
@@ -85,33 +77,12 @@ export function planChunkBoundaries(
   overlapSec = 15,
   resolution: MediaResolution = 'high'
 ): ChunkBoundary[] {
-  let targetCount = 1;
-
-  if (totalDurationSec <= 180) {
-    // 0 - 3 mins
-    targetCount = 1;
-  } else if (totalDurationSec <= 600) {
-    // 3 - 10 mins
-    targetCount = Math.min(2, Math.max(1, Math.round(totalDurationSec / 300)));
-  } else if (totalDurationSec <= 1800) {
-    // 10 - 30 mins
-    targetCount = Math.min(3, Math.max(2, Math.round(totalDurationSec / 600)));
-  } else if (totalDurationSec <= 3600) {
-    // 30 - 60 mins
-    targetCount = Math.min(4, Math.max(3, Math.round(totalDurationSec / 900)));
-  } else if (totalDurationSec <= 7200) {
-    // 1 - 2 hours
-    targetCount = 5;
-  } else if (totalDurationSec <= 14400) {
-    // 2 - 4 hours
-    targetCount = 6;
-  } else if (totalDurationSec <= 28800) {
-    // 4 - 8 hours
-    targetCount = 8;
-  } else {
-    // 8+ hours
-    targetCount = Math.min(12, Math.max(8, Math.round(totalDurationSec / 3600)));
-  }
+  const secondsPerWindow = totalDurationSec <= 2 * 3600
+    ? 15 * 60
+    : totalDurationSec <= 4 * 3600
+      ? 20 * 60
+      : 25 * 60;
+  const targetCount = Math.max(1, Math.ceil(totalDurationSec / secondsPerWindow));
 
   const chunks: ChunkBoundary[] = [];
   const nominalSliceSec = Math.ceil(totalDurationSec / targetCount);

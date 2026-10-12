@@ -209,7 +209,9 @@ async function generateWithCascade(
   contentsOrPrompt: string | any[],
   jsonMode = true,
   videoUri?: string,
-  userApiKey?: string
+  userApiKey?: string,
+  onTextChunk?: (text: string) => void,
+  videoWindow?: { startSec: number; endSec: number }
 ): Promise<{ text: string; modelUsed: string }> {
   const aiClient = getAiClient(userApiKey);
   const models = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
@@ -226,29 +228,44 @@ async function generateWithCascade(
           config.responseMimeType = 'application/json';
         }
 
+        const videoPart: any = {
+          fileData: {
+            fileUri: canonicalVideo,
+            mimeType: 'video/*',
+          },
+        };
+        // A time range in a prompt does not clip the video. Attach Gemini's
+        // native video metadata so this request receives only this window.
+        if (videoWindow) {
+          videoPart.videoMetadata = {
+            startOffset: `${Math.max(0, Math.floor(videoWindow.startSec))}s`,
+            endOffset: `${Math.max(Math.floor(videoWindow.startSec) + 1, Math.floor(videoWindow.endSec))}s`,
+          };
+        }
+
         const payloadContents = [
           {
             role: 'user',
             parts: [
-              {
-                fileData: {
-                  fileUri: canonicalVideo,
-                  mimeType: 'video/*',
-                },
-              },
+              videoPart,
               { text: contentsOrPrompt },
             ],
           },
         ];
 
-        const response = await aiClient.models.generateContent({
-          model,
-          contents: payloadContents,
-          config,
-        });
-
-        if (response && response.text) {
-          return { text: response.text, modelUsed: model };
+        if (onTextChunk) {
+          let text = '';
+          const stream = await aiClient.models.generateContentStream({ model, contents: payloadContents, config });
+          for await (const chunk of stream) {
+            if (chunk.text) {
+              text += chunk.text;
+              onTextChunk(chunk.text);
+            }
+          }
+          if (text) return { text, modelUsed: model };
+        } else {
+          const response = await aiClient.models.generateContent({ model, contents: payloadContents, config });
+          if (response && response.text) return { text: response.text, modelUsed: model };
         }
       } catch (err: any) {
         console.warn(`Model ${model} with video attachment failed: ${err.message}. Trying the next grounded model...`);
@@ -268,14 +285,27 @@ async function generateWithCascade(
         config.responseMimeType = 'application/json';
       }
 
-      const response = await aiClient.models.generateContent({
-        model,
-        contents: typeof contentsOrPrompt === 'string' ? contentsOrPrompt : contentsOrPrompt,
-        config,
-      });
-
-      if (response && response.text) {
-        return { text: response.text, modelUsed: model };
+      if (onTextChunk) {
+        let text = '';
+        const stream = await aiClient.models.generateContentStream({
+          model,
+          contents: typeof contentsOrPrompt === 'string' ? contentsOrPrompt : contentsOrPrompt,
+          config,
+        });
+        for await (const chunk of stream) {
+          if (chunk.text) {
+            text += chunk.text;
+            onTextChunk(chunk.text);
+          }
+        }
+        if (text) return { text, modelUsed: model };
+      } else {
+        const response = await aiClient.models.generateContent({
+          model,
+          contents: typeof contentsOrPrompt === 'string' ? contentsOrPrompt : contentsOrPrompt,
+          config,
+        });
+        if (response && response.text) return { text: response.text, modelUsed: model };
       }
     } catch (err: any) {
       console.warn(`Model ${model} text generation failed: ${err.message}. Trying next candidate...`);
@@ -605,7 +635,14 @@ Return strict JSON format:
 }
 `;
 
-    const genResult = await generateWithCascade(prompt, true, videoUrl, userApiKey);
+    const genResult = await generateWithCascade(
+      prompt,
+      true,
+      videoUrl,
+      userApiKey,
+      undefined,
+      { startSec: nominalStartSec, endSec: nominalEndSec }
+    );
     const parsed = cleanAndParseJson<any>(genResult.text);
 
     const transcriptList = Array.isArray(parsed.transcript) && parsed.transcript.length > 0
