@@ -32,7 +32,6 @@ import {
   ExternalLink,
   Layers,
   Key,
-  ClipboardPaste,
   X,
 } from 'lucide-react';
 
@@ -146,20 +145,6 @@ export default function App() {
     stopRequestedRef.current = true;
     setStatusMessage('Compiling markdown for completed segments...');
     addLog('User requested early compilation. Assembling markdown...');
-  };
-
-  const handleQuickPaste = async () => {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.readText) {
-        const text = await navigator.clipboard.readText();
-        if (text) {
-          setCurrentUrl(text.trim());
-          if (inputError) setInputError('');
-        }
-      }
-    } catch {
-      // ignore clipboard permission error
-    }
   };
 
   // Helper to strictly validate YouTube URL / video ID
@@ -510,32 +495,22 @@ export default function App() {
                     if (inputError) setInputError('');
                   }}
                   placeholder="Paste YouTube link (e.g. youtube.com/watch?v=...)"
-                  className="w-full pl-3.5 pr-16 sm:pr-20 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-md text-base sm:text-sm font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400 min-h-[44px]"
+                  className="w-full pl-3.5 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-md text-base sm:text-sm font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400 min-h-[44px]"
                   disabled={isAnalyzing}
                 />
                 
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                  {currentUrl ? (
+                {currentUrl && (
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
                     <button
                       type="button"
                       onClick={() => setCurrentUrl('')}
-                      className="p-1 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition touch-manipulation"
+                      className="p-1.5 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition touch-manipulation"
                       title="Clear URL"
                     >
                       <X className="w-4 h-4" />
                     </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleQuickPaste}
-                      className="px-2 py-1 text-[11px] font-mono text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded transition flex items-center gap-1 touch-manipulation"
-                      title="Paste from clipboard"
-                    >
-                      <ClipboardPaste className="w-3 h-3" />
-                      <span>Paste</span>
-                    </button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
               <button
