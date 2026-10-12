@@ -11,6 +11,7 @@ function groupRawCaptions(rawCaptions: any[], speaker: string): any[] {
   const grouped: any[] = [];
   let currentStart = Math.floor(rawCaptions[0].offset / 1000);
   let currentTexts: string[] = [];
+  let currentWordCount = 0;
   let lastEnd = currentStart;
 
   for (const cap of rawCaptions) {
@@ -25,7 +26,8 @@ function groupRawCaptions(rawCaptions: any[], speaker: string): any[] {
 
     if (!cleanText) continue;
 
-    if (startSec - currentStart >= 25 || currentTexts.join(' ').split(/\s+/).length >= 50) {
+    const wordCount = cleanText.split(/\s+/).length;
+    if (startSec - currentStart >= 25 || currentWordCount + wordCount >= 50) {
       if (currentTexts.length > 0) {
         grouped.push({
           id: `grouped-cap-${grouped.length}`,
@@ -38,9 +40,11 @@ function groupRawCaptions(rawCaptions: any[], speaker: string): any[] {
       }
       currentStart = startSec;
       currentTexts = [cleanText];
+      currentWordCount = wordCount;
       lastEnd = endSec;
     } else {
       currentTexts.push(cleanText);
+      currentWordCount += wordCount;
       lastEnd = Math.max(lastEnd, endSec);
     }
   }
@@ -60,6 +64,53 @@ function groupRawCaptions(rawCaptions: any[], speaker: string): any[] {
 }
 
 const app = express();
+
+// Warm Vercel instances can reuse these results across retries and repeated
+// analyses of the same video.
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const infoCache = new Map<string, { expiresAt: number; value: unknown }>();
+const transcriptCache = new Map<string, { expiresAt: number; value: any[] }>();
+const inFlightTranscripts = new Map<string, Promise<any[]>>();
+
+async function fetchWithTimeout(input: string, init: RequestInit = {}, timeoutMs = 10000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function errorResponse(error: any, fallback: string) {
+  const message = String(error?.message || '');
+  const status = Number(error?.status || error?.code);
+  if (/api key is required/i.test(message)) return { status: 401, error: 'Your Gemini API key is required.' };
+  if (status === 401 || status === 403 || /invalid.*key|permission denied/i.test(message)) {
+    return { status: 401, error: 'The Gemini API key was rejected. Check that it is active and has access to the selected model.' };
+  }
+  if (status === 429 || /rate limit|quota|resource exhausted/i.test(message)) {
+    return { status: 429, error: 'Gemini rate limit reached. Please wait briefly and try again.' };
+  }
+  if (error?.name === 'AbortError' || /timeout|timed out/i.test(message)) {
+    return { status: 504, error: 'The upstream service took too long to respond. Please retry.' };
+  }
+  return { status: 502, error: fallback };
+}
+
+function getCached<T>(cache: Map<string, { expiresAt: number; value: T }>, key: string): T | undefined {
+  const hit = cache.get(key);
+  if (!hit) return undefined;
+  if (hit.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return undefined;
+  }
+  return hit.value;
+}
+
+function setCached<T>(cache: Map<string, { expiresAt: number; value: T }>, key: string, value: T) {
+  cache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
+}
 
 // Middleware: JSON parser with 10mb limit
 app.use(express.json({ limit: '10mb' }));
@@ -151,9 +202,8 @@ function formatTime(s: number) {
 }
 
 /**
- * Intelligent cascading model caller:
- * 1. gemini-3.8-flash (primary recommended model)
- * 2. gemini-3.1-flash-lite (fast fallback)
+ * Grounded model caller. When a video is supplied, every candidate must
+ * inspect the video. A text-only fallback would invite fabricated analysis.
  */
 async function generateWithCascade(
   contentsOrPrompt: string | any[],
@@ -201,10 +251,14 @@ async function generateWithCascade(
           return { text: response.text, modelUsed: model };
         }
       } catch (err: any) {
-        console.warn(`Model ${model} with video attachment failed: ${err.message}. Trying text fallback...`);
+        console.warn(`Model ${model} with video attachment failed: ${err.message}. Trying the next grounded model...`);
         lastError = err;
+        continue;
       }
     }
+
+    // Never send a video-analysis prompt as text after video inspection fails.
+    if (canonicalVideo) continue;
 
     try {
       const config: any = {
@@ -255,6 +309,9 @@ router.get('/youtube/info', async (req, res) => {
       });
     }
 
+    const cachedInfo = getCached(infoCache, videoId);
+    if (cachedInfo) return res.json(cachedInfo);
+
     let title = 'YouTube Video';
     let author = 'Presenter';
     let thumbnail = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
@@ -263,10 +320,22 @@ router.get('/youtube/info', async (req, res) => {
     const creatorChapters: { startSec: number; title: string }[] = [];
     let oembedSuccess = false;
 
+    // Start the expensive watch-page request before waiting for oEmbed.
+    // They are independent and can complete in parallel.
+    const pagePromise = fetchWithTimeout(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    }).catch((err) => {
+      console.warn('YouTube page fetch error:', err);
+      return null;
+    });
+
     // Step 1: Fetch oEmbed for pristine title and channel name
     try {
       const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}&format=json`;
-      const oembedRes = await fetch(oembedUrl);
+      const oembedRes = await fetchWithTimeout(oembedUrl);
       if (oembedRes.ok) {
         const odata = await oembedRes.json();
         if (odata.title) title = odata.title;
@@ -281,13 +350,8 @@ router.get('/youtube/info', async (req, res) => {
     // Step 2: Fetch watch page to extract accurate duration & description
     let isUnavailable = false;
     try {
-      const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-          'Accept-Language': 'en-US,en;q=0.9',
-        },
-      });
-      if (pageRes.ok) {
+      const pageRes = await pagePromise;
+      if (pageRes?.ok) {
         const html = await pageRes.text();
         if (html.includes('Video unavailable') || html.includes('"status":"ERROR"')) {
           isUnavailable = true;
@@ -394,7 +458,7 @@ router.get('/youtube/info', async (req, res) => {
       }
     }
 
-    return res.json({
+    const info = {
       title,
       author,
       thumbnail,
@@ -402,10 +466,13 @@ router.get('/youtube/info', async (req, res) => {
       description: description.slice(0, 3000),
       creatorChapters: creatorChapters.sort((a, b) => a.startSec - b.startSec),
       url: getCanonicalYouTubeUrl(url),
-    });
+    };
+    setCached(infoCache, videoId, info);
+    return res.json(info);
   } catch (err: any) {
     console.error('YouTube info error:', err);
-    return res.status(500).json({ error: err.message || 'Failed to inspect YouTube video' });
+    const failure = errorResponse(err, 'Failed to inspect the YouTube video. Please verify the link and try again.');
+    return res.status(failure.status).json({ error: failure.error });
   }
 });
 
@@ -414,6 +481,7 @@ router.post('/gemini/course-roadmap', async (req, res) => {
   try {
     const { videoUrl, videoTitle, channelTitle, durationSec, numSegments, creatorChapters, videoDescription, apiKey: bodyApiKey } = req.body;
     const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
+    getAiClient(userApiKey); // Fail fast before building prompts or contacting YouTube.
     const durationFormatted = formatTime(durationSec || 600);
     const isShort = (durationSec || 600) <= 600;
 
@@ -427,6 +495,11 @@ Title: "${videoTitle}"
 Channel: "${channelTitle}"
 Total Duration: ${durationFormatted} (${durationSec} seconds).
 Requested Segments: ${numSegments || (isShort ? 1 : 4)}.
+
+GROUNDING RULES:
+- Use only information visible or audible in the supplied video and the supplied metadata.
+- Do not infer topics, chapters, or teaching points from the title alone.
+- If a section cannot be confidently identified, use a neutral title such as "Unclear section" rather than inventing one.
 
 ${videoDescription ? `Video Description/Context:\n"""\n${videoDescription.slice(0, 1500)}\n"""\n` : ''}
 
@@ -454,7 +527,8 @@ Return ONLY a JSON array with exactly this format:
     return res.json({ roadmap: parsed, modelUsed: result.modelUsed });
   } catch (err: any) {
     console.warn('Course roadmap error:', err);
-    return res.status(500).json({ error: err.message });
+    const failure = errorResponse(err, 'Could not build the video roadmap. Please try again.');
+    return res.status(failure.status).json({ error: failure.error });
   }
 });
 
@@ -477,6 +551,7 @@ router.post('/gemini/analyze-chunk', async (req, res) => {
 
     const chunkIndex = bodyChunkIndex ?? segmentIndex ?? 0;
     const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
+    getAiClient(userApiKey);
     const startFormatted = formatTime(nominalStartSec);
     const endFormatted = formatTime(nominalEndSec);
     const chunkSpanSec = Math.max(1, nominalEndSec - nominalStartSec);
@@ -497,6 +572,9 @@ STRICT ACCURACY RULES:
 3. If code or commands are shown, transcribe them into extractedTextOrCode.
 4. Summary: Concise, factual overview of what occurs between ${startFormatted} and ${endFormatted}.
 5. Key Takeaways: 2 to 3 factual takeaways or key learning points.
+6. Never infer hidden content, speaker intent, code, equations, identities, or events from context.
+7. If audio is unclear or a visual cannot be read confidently, write "Not clearly observable" instead of guessing.
+8. Return an empty visualObservations array when no meaningful visual event is clearly observable.
 
 Return strict JSON format:
 {
@@ -580,7 +658,8 @@ Return strict JSON format:
     });
   } catch (err: any) {
     console.warn('Analyze chunk error:', err);
-    return res.status(500).json({ error: err.message });
+    const failure = errorResponse(err, 'Could not analyze this video segment. Please try again.');
+    return res.status(failure.status).json({ error: failure.error });
   }
 });
 
@@ -598,26 +677,37 @@ router.post('/gemini/generate-full-notes', async (req, res) => {
     } = req.body;
 
     const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
+    getAiClient(userApiKey); // Validate BYOK before caption retrieval.
     const durationFormatted = formatTime(durationSec);
     const hasCreatorChapters = Array.isArray(creatorChapters) && creatorChapters.length > 1;
+    const transcriptTarget = durationSec <= 600 ? '6 to 10' : durationSec <= 3600 ? '10 to 16' : '16 to 24';
 
     // 1. Attempt to fetch authentic official YouTube captions
     const videoId = extractYouTubeVideoId(videoUrl);
     let officialTranscript: any[] = [];
     if (videoId) {
       try {
-        const rawCaptions = await YoutubeTranscript.fetchTranscript(videoId);
+        const cachedCaptions = getCached(transcriptCache, videoId);
+        let transcriptRequest = inFlightTranscripts.get(videoId);
+        if (!cachedCaptions && !transcriptRequest) {
+          transcriptRequest = YoutubeTranscript.fetchTranscript(videoId);
+          inFlightTranscripts.set(videoId, transcriptRequest);
+        }
+        const rawCaptions = cachedCaptions || await transcriptRequest;
         if (Array.isArray(rawCaptions) && rawCaptions.length > 0) {
+          if (!cachedCaptions) setCached(transcriptCache, videoId, rawCaptions);
           officialTranscript = groupRawCaptions(rawCaptions, channelTitle || 'Speaker');
         }
       } catch (_err) {
         // Captions disabled or unavailable on YouTube; Gemini will transcribe from the video
+      } finally {
+        inFlightTranscripts.delete(videoId);
       }
     }
 
     const hasOfficialTranscript = officialTranscript.length > 0;
     const transcriptExcerpt = hasOfficialTranscript
-      ? `\nOfficial Verified YouTube Transcript:\n${officialTranscript.slice(0, 40).map((t) => `[${t.timestampStr}] ${t.text}`).join('\n')}\n`
+      ? `\nOfficial Verified YouTube Transcript:\n${officialTranscript.map((t) => `[${t.timestampStr}] ${t.text}`).join('\n').slice(0, 120000)}\n`
       : '';
 
     const prompt = `
@@ -628,6 +718,13 @@ URL: ${videoUrl || 'YouTube Video'}
 Title: "${videoTitle}"
 Channel / Presenter: "${channelTitle || 'Speaker'}"
 Duration: ${durationFormatted} (${durationSec} seconds)
+
+NON-HALLUCINATION RULES:
+- Every claim must be directly supported by the supplied video, official captions, or supplied description/chapters.
+- Do not fill gaps with likely content or general knowledge.
+- Do not invent quotations, code, equations, timestamps, chapter topics, people, products, or visual details.
+- If something is not clear, say "Not clearly observable" or omit it.
+- Visual notes must describe only what is visibly present; do not infer what a screen or diagram means.
 
 ${hasCreatorChapters ? `Creator Chapters Provided:\n${JSON.stringify(creatorChapters, null, 2)}\n` : ''}
 ${videoDescription ? `Video Context / Description:\n"""\n${videoDescription.slice(0, 1000)}\n"""\n` : ''}
@@ -641,9 +738,8 @@ ${
   hasOfficialTranscript
     ? `NOTE: Official YouTube captions were detected and will be used. Ensure chapters, key takeaways, and visual code blocks are deeply detailed.`
     : `MANDATORY TRANSCRIPT DENSITY REQUIREMENT:
-You MUST provide a comprehensive, dense chronological transcript covering the ENTIRE duration of this video from 00:00 to ${durationFormatted}.
-Produce at least 12 to 25 continuous timestamped entries (every 30 to 60 seconds) capturing the actual dialogue, explanations, code walkthrough, and instructions spoken by ${channelTitle || 'the speaker'}.
-Do NOT provide only 2 or 3 lines. The transcript must span across all sections from start to finish.`
+Provide ${transcriptTarget} concise timestamped entries distributed across the entire video. Capture only the most important dialogue, explanations, code walkthroughs, and instructions spoken by ${channelTitle || 'the speaker'}.
+Do not reproduce a word-for-word transcript or add repetitive entries.`
 }
 
 Return STRICT JSON:
@@ -691,6 +787,8 @@ Return STRICT JSON:
 }
 `;
 
+    // Keep the video attached even when captions are available: captions cover
+    // speech, but Gemini is also used here for on-screen text and visuals.
     const genResult = await generateWithCascade(prompt, true, videoUrl, userApiKey);
     const parsed = cleanAndParseJson<any>(genResult.text);
 
@@ -706,7 +804,8 @@ Return STRICT JSON:
     });
   } catch (err: any) {
     console.warn('Generate full notes error:', err);
-    return res.status(500).json({ error: err.message });
+    const failure = errorResponse(err, 'Could not generate notes for this video. Please try again.');
+    return res.status(failure.status).json({ error: failure.error });
   }
 });
 
@@ -715,6 +814,7 @@ router.post('/gemini/hierarchical-reduce', async (req, res) => {
   try {
     const { videoUrl, videoTitle, channelTitle, durationSec, chapterSummaries, apiKey: bodyApiKey } = req.body;
     const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
+    getAiClient(userApiKey);
     const isShort = (durationSec || 600) <= 600;
 
     const prompt = `
@@ -741,7 +841,8 @@ Return JSON:
     return res.json(parsed);
   } catch (err: any) {
     console.warn('Hierarchical reduce error:', err);
-    return res.status(500).json({ error: err.message });
+    const failure = errorResponse(err, 'Could not finish the summary. The notes can be regenerated safely.');
+    return res.status(failure.status).json({ error: failure.error });
   }
 });
 

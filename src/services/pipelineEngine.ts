@@ -148,6 +148,38 @@ function normalizeText(text: string): string {
     .trim();
 }
 
+function codeFenceFor(code: string): string {
+  const runs = code.match(/`+/g) || [];
+  const longestRun = runs.reduce((max, run) => Math.max(max, run.length), 2);
+  return '`'.repeat(longestRun + 1);
+}
+
+function markdownText(value: unknown, fallback = ''): string {
+  if (typeof value === 'string') {
+    return value.replace(/\u0000/g, '').replace(/\r\n?/g, '\n').trim() || fallback;
+  }
+  if (value === null || value === undefined) return fallback;
+  return String(value).replace(/\u0000/g, '').replace(/\r\n?/g, '\n').trim() || fallback;
+}
+
+function markdownOneLine(value: unknown, fallback = ''): string {
+  return markdownText(value, fallback).replace(/[\r\n]+/g, ' ');
+}
+
+function compactTranscript<T>(entries: T[], durationSec: number): T[] {
+  const maxEntries = durationSec <= 600 ? 12 : durationSec <= 3600 ? 24 : 40;
+  if (entries.length <= maxEntries) return entries;
+
+  // Preserve coverage across the whole video instead of keeping only the
+  // beginning, which makes long Markdown files both shorter and more useful.
+  const selected: T[] = [];
+  const step = (entries.length - 1) / (maxEntries - 1);
+  for (let i = 0; i < maxEntries; i++) {
+    selected.push(entries[Math.round(i * step)]);
+  }
+  return selected;
+}
+
 /**
  * Deduplicates overlapping speech entries between consecutive chunks
  */
@@ -244,13 +276,61 @@ export function performHierarchicalReduce(
  * - Long courses (1h - 8h+): Full table of contents, in-depth chapters, visual notes, and transcript
  */
 export function generateMarkdownReport(report: FullAnalysisReport): string {
-  const { metadata, executiveSummary, keyTakeaways, chapters, transcript, visualObservations } = report;
+  const metadata = report.metadata;
+  const title = markdownOneLine(metadata.title, 'Untitled Video');
+  const channel = markdownOneLine(metadata.channel, 'Unknown Channel');
+  const sourceUrl = markdownOneLine(metadata.url, '');
+  const executiveSummary = markdownText(report.executiveSummary, 'No executive summary was generated.');
+  const keyTakeaways = (Array.isArray(report.keyTakeaways) ? report.keyTakeaways : [])
+    .map((item) => markdownText(item))
+    .filter(Boolean);
+  let chapters = (Array.isArray(report.chapters) ? report.chapters : []).map((chapter, index) => ({
+    ...chapter,
+    chapterIndex: Number.isFinite(chapter.chapterIndex) ? chapter.chapterIndex : index + 1,
+    title: markdownOneLine(chapter.title, `Chapter ${index + 1}`),
+    timeRangeStr: markdownOneLine(
+      chapter.timeRangeStr,
+      `${formatTimestamp(Math.max(0, chapter.startSec || 0))} - ${formatTimestamp(Math.max(0, chapter.endSec || 0))}`
+    ),
+    overview: markdownText(chapter.overview, 'No chapter overview was generated.'),
+    keyConcepts: (Array.isArray(chapter.keyConcepts) ? chapter.keyConcepts : []).map((item) => markdownText(item)).filter(Boolean),
+  }));
+  if (chapters.length === 0) {
+    chapters = [{
+      chapterIndex: 1,
+      title,
+      startSec: 0,
+      endSec: Math.max(0, metadata.durationSec || 0),
+      timeRangeStr: `00:00 - ${formatTimestamp(Math.max(0, metadata.durationSec || 0))}`,
+      coveredChunks: [],
+      overview: executiveSummary,
+      keyConcepts: [],
+      scientificHighlights: [],
+    }];
+  }
+  const normalizedTranscript = (Array.isArray(report.transcript) ? report.transcript : [])
+    .filter((entry) => entry && markdownText(entry.text))
+    .map((entry) => ({
+      ...entry,
+      timestampStr: markdownOneLine(entry.timestampStr, formatTimestamp(Math.max(0, entry.startSec || 0))),
+      speaker: markdownOneLine(entry.speaker, 'Speaker'),
+      text: markdownText(entry.text),
+    }));
+  const transcript = compactTranscript(normalizedTranscript, Math.max(0, metadata.durationSec || 0));
+  const visualObservations = (Array.isArray(report.visualObservations) ? report.visualObservations : [])
+    .map((visual) => ({
+      ...visual,
+      timestampStr: markdownOneLine(visual.timestampStr, formatTimestamp(Math.max(0, visual.timestampSec || 0))),
+      headline: markdownOneLine(visual.headline, 'Visual observation'),
+      description: markdownText(visual.description),
+      extractedTextOrCode: markdownText(visual.extractedTextOrCode),
+    }))
+    .filter((visual) => visual.description || visual.extractedTextOrCode);
   const isShort = metadata.durationSec <= 600; // <= 10 mins
-  const isMedium = metadata.durationSec > 600 && metadata.durationSec <= 3600;
 
-  let md = `# ${metadata.title}\n\n`;
-  md += `**Presenter / Channel:** ${metadata.channel}  \n`;
-  md += `**Source URL:** [${metadata.url}](${metadata.url})  \n`;
+  let md = `# ${title}\n\n`;
+  md += `**Presenter / Channel:** ${channel}  \n`;
+  md += sourceUrl ? `**Source URL:** [${sourceUrl}](${sourceUrl})  \n` : '';
   md += `**Duration:** ${formatTimestamp(metadata.durationSec)} (${metadata.durationSec}s)  \n`;
   md += `**Sections:** ${chapters.length} ${chapters.length === 1 ? 'Section' : 'Chapters'}  \n`;
   md += `**Generated Date:** ${new Date(report.generatedAt).toLocaleString()}  \n\n`;
@@ -264,23 +344,23 @@ export function generateMarkdownReport(report: FullAnalysisReport): string {
     md += `3. [Chapter Breakdown](#chapter-breakdown)\n`;
     if (visualObservations.length > 0) {
       md += `4. [Visual & Key Points](#visual--key-points)\n`;
-      md += `5. [Timestamped Transcript](#timestamped-transcript)\n\n`;
+      md += `5. [Timestamped Transcript Highlights](#timestamped-transcript-highlights)\n\n`;
     } else {
-      md += `4. [Timestamped Transcript](#timestamped-transcript)\n\n`;
+      md += `4. [Timestamped Transcript Highlights](#timestamped-transcript-highlights)\n\n`;
     }
     md += `---\n\n`;
   }
 
   md += `## 📌 Summary\n\n${executiveSummary}\n\n`;
 
+  md += `---\n\n`;
+  md += `## 🎯 Key Takeaways\n\n`;
   if (keyTakeaways.length > 0) {
-    md += `---\n\n`;
-    md += `## 🎯 Key Takeaways\n\n`;
-    for (const takeaway of keyTakeaways) {
-      md += `- ${takeaway}\n`;
-    }
-    md += `\n`;
+    for (const takeaway of keyTakeaways) md += `- ${takeaway}\n`;
+  } else {
+    md += `- No key takeaways were returned by the analysis.\n`;
   }
+  md += `\n`;
 
   // Chapter Breakdown
   md += `---\n\n`;
@@ -316,7 +396,8 @@ export function generateMarkdownReport(report: FullAnalysisReport): string {
       }
       const rawCode = vis.extractedTextOrCode ? vis.extractedTextOrCode.trim() : '';
       if (rawCode && !/^(none|n\/a|null|empty)$/i.test(rawCode)) {
-        md += `\`\`\`\n${rawCode}\n\`\`\`\n\n`;
+        const fence = codeFenceFor(rawCode);
+        md += `${fence}\n${rawCode}\n${fence}\n\n`;
       }
     }
   }
@@ -325,7 +406,7 @@ export function generateMarkdownReport(report: FullAnalysisReport): string {
   const cleanTranscript = transcript.filter((t) => t && t.text && t.text.trim().length > 0);
   if (cleanTranscript.length > 0) {
     md += `---\n\n`;
-    md += `## 📜 Timestamped Transcript\n\n`;
+    md += `## 📜 Timestamped Transcript Highlights\n\n`;
     for (const entry of cleanTranscript) {
       md += `**[${entry.timestampStr}] ${entry.speaker}:**  \n${entry.text.trim()}\n\n`;
     }

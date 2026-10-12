@@ -44,6 +44,19 @@ interface SegmentRoadmapItem {
   keyTopics?: string[];
 }
 
+async function apiErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = await response.json();
+    if (payload?.error) return payload.error;
+  } catch {
+    // Use the status-based fallback below when the server did not return JSON.
+  }
+  if (response.status === 401 || response.status === 403) return 'Your Gemini API key was rejected. Check the key and try again.';
+  if (response.status === 429) return 'Gemini rate limit reached. Wait briefly and try again.';
+  if (response.status === 504) return 'The request took too long. Try a shorter video or retry.';
+  return `${fallback} (HTTP ${response.status})`;
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [currentUrl, setCurrentUrl] = useState('');
@@ -54,38 +67,50 @@ export default function App() {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
-  const [customApiKey, setCustomApiKey] = useState<string>(() => {
+  const [customApiKeys, setCustomApiKeys] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('gemini_custom_api_key') || sessionStorage.getItem('gemini_custom_api_key') || '';
+      const stored = localStorage.getItem('gemini_custom_api_keys') || sessionStorage.getItem('gemini_custom_api_keys');
+      const legacy = localStorage.getItem('gemini_custom_api_key') || sessionStorage.getItem('gemini_custom_api_key');
+      return (stored ? stored.split('\n') : legacy ? [legacy] : []).map((key) => key.trim()).filter(Boolean);
     }
-    return '';
+    return [];
   });
+  const [activeApiKeyIndex, setActiveApiKeyIndex] = useState(0);
+  const activeApiKeyIndexRef = useRef(0);
 
   const [isPersistedLocally, setIsPersistedLocally] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      return !!localStorage.getItem('gemini_custom_api_key');
+      return !!localStorage.getItem('gemini_custom_api_keys') || !!localStorage.getItem('gemini_custom_api_key');
     }
     return true;
   });
 
-  const handleSaveApiKey = (key: string, persist: boolean) => {
-    setCustomApiKey(key);
+  const handleSaveApiKey = (keysText: string, persist: boolean) => {
+    const keys = Array.from(new Set(keysText.split(/[\n,]+/).map((key) => key.trim()).filter(Boolean)));
+    setCustomApiKeys(keys);
+    setActiveApiKeyIndex(0);
+    activeApiKeyIndexRef.current = 0;
     setIsPersistedLocally(persist);
     if (typeof window !== 'undefined') {
-      if (key) {
+      localStorage.removeItem('gemini_custom_api_key');
+      sessionStorage.removeItem('gemini_custom_api_key');
+      if (keys.length > 0) {
+        const serialized = keys.join('\n');
         if (persist) {
-          localStorage.setItem('gemini_custom_api_key', key);
-          sessionStorage.removeItem('gemini_custom_api_key');
+          localStorage.setItem('gemini_custom_api_keys', serialized);
+          sessionStorage.removeItem('gemini_custom_api_keys');
         } else {
-          sessionStorage.setItem('gemini_custom_api_key', key);
-          localStorage.removeItem('gemini_custom_api_key');
+          sessionStorage.setItem('gemini_custom_api_keys', serialized);
+          localStorage.removeItem('gemini_custom_api_keys');
         }
       } else {
-        localStorage.removeItem('gemini_custom_api_key');
-        sessionStorage.removeItem('gemini_custom_api_key');
+        localStorage.removeItem('gemini_custom_api_keys');
+        sessionStorage.removeItem('gemini_custom_api_keys');
       }
     }
   };
+
+  const customApiKey = customApiKeys[activeApiKeyIndex] || '';
 
   const [inputError, setInputError] = useState('');
   const [currentVideoMeta, setCurrentVideoMeta] = useState<VideoMetadata | null>(null);
@@ -141,6 +166,28 @@ export default function App() {
     setActivityLogs((prev) => [...prev.slice(-40), `[${time}] ${msg}`]);
   };
 
+  const requestWithKeyRotation = async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const attempts = Math.max(1, customApiKeys.length);
+    let response: Response | null = null;
+
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const key = customApiKeys[activeApiKeyIndexRef.current] || '';
+      const headers = new Headers(init.headers);
+      if (key) headers.set('x-gemini-api-key', key);
+      response = await fetch(input, { ...init, headers });
+
+      const shouldRotate = [401, 403, 429].includes(response.status) && attempt < attempts - 1;
+      if (!shouldRotate) return response;
+
+      const nextIndex = (activeApiKeyIndexRef.current + 1) % customApiKeys.length;
+      activeApiKeyIndexRef.current = nextIndex;
+      setActiveApiKeyIndex(nextIndex);
+      addLog(`API key ${attempt + 1} was rejected or exhausted. Trying key ${nextIndex + 1}...`);
+    }
+
+    return response as Response;
+  };
+
   const handleStopEarly = () => {
     stopRequestedRef.current = true;
     setStatusMessage('Compiling markdown for completed segments...');
@@ -165,7 +212,7 @@ export default function App() {
     const url = currentUrl.trim();
     if (!url || isAnalyzing) return;
 
-    // Strict BYOK verification: Every user must provide their own Gemini API key
+    // Every visitor must provide their own Gemini API key.
     if (!customApiKey || !customApiKey.trim()) {
       setIsApiKeyModalOpen(true);
       setInputError('A Gemini API key is required. Please click "Set API Key" or provide your free key below to generate markdown notes.');
@@ -199,7 +246,14 @@ export default function App() {
       let creatorChapters: { startSec: number; title: string }[] = [];
 
       try {
-        const infoRes = await fetch(`/api/youtube/info?url=${encodeURIComponent(url)}`);
+        const infoController = new AbortController();
+        const infoTimeout = setTimeout(() => infoController.abort(), 12000);
+        let infoRes: Response;
+        try {
+          infoRes = await fetch(`/api/youtube/info?url=${encodeURIComponent(url)}`, { signal: infoController.signal });
+        } finally {
+          clearTimeout(infoTimeout);
+        }
         if (infoRes.ok) {
           const info = await infoRes.json();
           if (info.title) videoTitle = info.title;
@@ -208,7 +262,7 @@ export default function App() {
           if (info.description) description = info.description;
           if (Array.isArray(info.creatorChapters)) creatorChapters = info.creatorChapters;
         } else {
-          throw new Error('Backend inspect returned non-200');
+          throw new Error(await apiErrorMessage(infoRes, 'Could not inspect the YouTube video'));
         }
       } catch (backendErr) {
         addLog('Server inspection notice: Trying direct YouTube oEmbed fallback...');
@@ -249,13 +303,6 @@ export default function App() {
       const planned = planChunkBoundaries(durationSec);
       setPlannedChunks(planned);
 
-      const apiHeaders: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (customApiKey) {
-        apiHeaders['x-gemini-api-key'] = customApiKey.trim();
-      }
-
       let generatedReport: FullAnalysisReport | null = null;
 
       // 3. Fast Unified Generation (Single-pass, 10-15s total)
@@ -273,9 +320,9 @@ export default function App() {
 
         let fastRes: Response | null = null;
         try {
-          fastRes = await fetch('/api/gemini/generate-full-notes', {
+          fastRes = await requestWithKeyRotation('/api/gemini/generate-full-notes', {
             method: 'POST',
-            headers: apiHeaders,
+            headers: { 'Content-Type': 'application/json' },
             signal: controller.signal,
             body: JSON.stringify({
               videoUrl: url,
@@ -284,12 +331,18 @@ export default function App() {
               durationSec,
               creatorChapters,
               videoDescription: description,
-              apiKey: customApiKey || undefined,
             }),
           });
         } finally {
           clearTimeout(timeoutId);
           clearInterval(progressInterval);
+        }
+
+        if (fastRes && !fastRes.ok) {
+          const message = await apiErrorMessage(fastRes, 'Fast note generation failed');
+          const apiError = new Error(message) as Error & { stopFallback?: boolean };
+          apiError.stopFallback = [400, 401, 403, 429].includes(fastRes.status);
+          throw apiError;
         }
 
         if (fastRes && fastRes.ok) {
@@ -377,6 +430,7 @@ export default function App() {
           }
         }
       } catch (fastErr: any) {
+        if (fastErr?.stopFallback) throw fastErr;
         addLog(`Fast pass notice: ${fastErr.message}. Running fallback chapter analysis...`);
       }
 
@@ -397,9 +451,9 @@ export default function App() {
       let roadmap: SegmentRoadmapItem[] = [];
 
       try {
-        const roadmapRes = await fetch('/api/gemini/course-roadmap', {
+        const roadmapRes = await requestWithKeyRotation('/api/gemini/course-roadmap', {
           method: 'POST',
-          headers: apiHeaders,
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             videoUrl: url,
             videoTitle,
@@ -408,7 +462,6 @@ export default function App() {
             numSegments: planned.length,
             creatorChapters,
             videoDescription: description,
-            apiKey: customApiKey || undefined,
           }),
         });
 
@@ -452,9 +505,9 @@ export default function App() {
         addLog(`[Segment ${i + 1}/${planned.length}] Analyzing ${timeSpan} — ${segTitle}`);
 
         try {
-          const res = await fetch('/api/gemini/analyze-chunk', {
+          const res = await requestWithKeyRotation('/api/gemini/analyze-chunk', {
             method: 'POST',
-            headers: apiHeaders,
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               videoUrl: url,
               videoTitle,
@@ -466,12 +519,11 @@ export default function App() {
               keyTopicsHint: segmentInfo?.keyTopics,
               videoDescription: description,
               totalDurationSec: durationSec,
-              apiKey: customApiKey || undefined,
             }),
           });
 
           if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`);
+            throw new Error(await apiErrorMessage(res, `Segment ${i + 1} failed`));
           }
 
           const data = await res.json();
@@ -544,15 +596,14 @@ export default function App() {
       let finalKeyTakeaways = reduceOutput.keyTakeaways;
 
       try {
-        const reduceRes = await fetch('/api/gemini/hierarchical-reduce', {
+        const reduceRes = await requestWithKeyRotation('/api/gemini/hierarchical-reduce', {
           method: 'POST',
-          headers: apiHeaders,
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             videoUrl: url,
             videoTitle,
             channelTitle: authorName,
             durationSec,
-            apiKey: customApiKey || undefined,
             chapterSummaries: reduceOutput.chapters.map((c) => ({
               title: c.title,
               timeRange: c.timeRangeStr,
@@ -617,7 +668,7 @@ export default function App() {
         onOpenDriveModal={() => setIsDriveModalOpen(true)}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
-        apiKey={customApiKey}
+        apiKey={customApiKeys.length ? String(customApiKeys.length) : ''}
         onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
       />
 
@@ -625,7 +676,7 @@ export default function App() {
       <ApiKeyModal
         isOpen={isApiKeyModalOpen}
         onClose={() => setIsApiKeyModalOpen(false)}
-        apiKey={customApiKey}
+        apiKey={customApiKeys.join('\n')}
         onSaveKey={handleSaveApiKey}
         hasEnvKey={true}
         initialPersist={isPersistedLocally}

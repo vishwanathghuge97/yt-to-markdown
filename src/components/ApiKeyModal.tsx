@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Key, Eye, EyeOff, Check, AlertCircle, ExternalLink, X, ShieldCheck } from 'lucide-react';
+import { Key, Check, ExternalLink, X, ShieldCheck } from 'lucide-react';
 
 interface ApiKeyModalProps {
   isOpen: boolean;
@@ -19,7 +19,6 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
   initialPersist = true,
 }) => {
   const [inputVal, setInputVal] = useState(apiKey);
-  const [showKey, setShowKey] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [persistLocally, setPersistLocally] = useState(initialPersist);
 
@@ -60,7 +59,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
             </div>
             <div>
               <h3 className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
-                Gemini API Key
+                Gemini API Keys
               </h3>
               <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                 Bring your own API key (BYOK)
@@ -79,7 +78,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         <form onSubmit={handleSave} className="p-5 space-y-4">
           <div className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed space-y-2">
             <p>
-              To protect server quotas, <strong>each visitor uses their own Gemini API key</strong>.
+              Add multiple keys, one per line. The app automatically tries the next key when one is rejected, rate-limited, or exhausted.
             </p>
             <div className="bg-zinc-50 dark:bg-zinc-950 p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-800 space-y-1.5">
               <div className="flex items-center gap-1.5 font-semibold text-zinc-800 dark:text-zinc-200">
@@ -95,25 +94,17 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
 
           <div>
             <label className="block text-xs font-mono font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-              API Key:
+              API Keys (one per line):
             </label>
             <div className="relative">
-              <input
-                type={showKey ? 'text' : 'password'}
+              <textarea
                 value={inputVal}
                 onChange={(e) => setInputVal(e.target.value)}
-                placeholder="AIzaSy..."
-                className="w-full pl-3 pr-11 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-lg text-base sm:text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400 min-h-[42px]"
+                placeholder={'AIzaSy...\nAIzaSy...'}
+                rows={4}
+                spellCheck={false}
+                className="w-full px-3 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-lg text-base sm:text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400 resize-y"
               />
-              <button
-                type="button"
-                onClick={() => setShowKey(!showKey)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 p-1.5 touch-manipulation"
-                title={showKey ? 'Hide key' : 'Show key'}
-                aria-label={showKey ? 'Hide API key' : 'Show API key'}
-              >
-                {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
             </div>
           </div>
 

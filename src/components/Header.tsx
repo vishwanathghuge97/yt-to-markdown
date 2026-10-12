@@ -76,7 +76,7 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Key className="w-3.5 h-3.5 shrink-0" />
             <span className="hidden md:inline">
-              {apiKey ? 'API Key Set' : 'Set API Key'}
+              {apiKey ? `${apiKey} API ${apiKey === '1' ? 'Key' : 'Keys'}` : 'Set API Key'}
             </span>
             <span
               className={`w-1.5 h-1.5 rounded-full shrink-0 ${
