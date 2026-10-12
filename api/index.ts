@@ -162,7 +162,7 @@ async function generateWithCascade(
   userApiKey?: string
 ): Promise<{ text: string; modelUsed: string }> {
   const aiClient = getAiClient(userApiKey);
-  const models = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+  const models = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
   const canonicalVideo = videoUri ? getCanonicalYouTubeUrl(videoUri) : undefined;
   let lastError: any = null;
 

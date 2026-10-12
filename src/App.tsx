@@ -264,21 +264,35 @@ export default function App() {
         setStatusMessage(`Generating structured notes & Markdown for "${videoTitle}"...`);
         addLog(`Analyzing video stream with Gemini AI (Fast Single-Pass Pipeline)...`);
 
-        const fastRes = await fetch('/api/gemini/generate-full-notes', {
-          method: 'POST',
-          headers: apiHeaders,
-          body: JSON.stringify({
-            videoUrl: url,
-            videoTitle,
-            channelTitle: authorName,
-            durationSec,
-            creatorChapters,
-            videoDescription: description,
-            apiKey: customApiKey || undefined,
-          }),
-        });
+        const progressInterval = setInterval(() => {
+          setProgressPercent((prev) => (prev < 85 ? prev + 6 : prev));
+        }, 1200);
 
-        if (fastRes.ok) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 55000);
+
+        let fastRes: Response | null = null;
+        try {
+          fastRes = await fetch('/api/gemini/generate-full-notes', {
+            method: 'POST',
+            headers: apiHeaders,
+            signal: controller.signal,
+            body: JSON.stringify({
+              videoUrl: url,
+              videoTitle,
+              channelTitle: authorName,
+              durationSec,
+              creatorChapters,
+              videoDescription: description,
+              apiKey: customApiKey || undefined,
+            }),
+          });
+        } finally {
+          clearTimeout(timeoutId);
+          clearInterval(progressInterval);
+        }
+
+        if (fastRes && fastRes.ok) {
           const fastData = await fastRes.json();
           const r = fastData.result || {};
 
