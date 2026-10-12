@@ -3,18 +3,120 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>yt-to-markdown </title>
-    <meta name="description" content="Zero-skip multimodal YouTube video and lecture analyzer with visual frame OCR, scientific literature synthesis, and Google Drive export." />
-    <meta property="og:title" content="OmniScribe Science - YouTube Video Transcriber & Summarizer" />
-    <meta property="og:description" content="Zero-skip multimodal YouTube video and lecture analyzer with visual frame OCR, scientific literature synthesis, and Google Drive export." />
+    <title>OmniScribe – YouTube to Markdown & Video Note Summarizer</title>
+    
+    <!-- Primary SEO Meta Tags -->
+    <meta name="title" content="OmniScribe – YouTube to Markdown & Video Note Summarizer" />
+    <meta name="description" content="Convert YouTube videos and lectures into structured Markdown notes, timestamped summaries, formulas, and flashcards with AI. Export to Google Drive." />
+    <meta name="keywords" content="youtube to markdown, youtube video to text, video notes ai, lecture notes generator, youtube transcript summarizer, study notes, gemini video analyzer, markdown notes from video" />
+    <meta name="author" content="OmniScribe" />
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+    <link rel="canonical" href="https://yt-to-markdown.vercel.app/" />
+    
+    <!-- Favicon & Icons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <meta name="theme-color" content="#4f46e5" />
+    
+    <!-- Open Graph / Facebook / LinkedIn / Discord -->
     <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image" />
+    <meta property="og:url" content="https://yt-to-markdown.vercel.app/" />
+    <meta property="og:site_name" content="OmniScribe" />
+    <meta property="og:title" content="OmniScribe – YouTube to Markdown & Video Note Summarizer" />
+    <meta property="og:description" content="Convert YouTube videos and lectures into structured Markdown notes, timestamped summaries, formulas, and flashcards with AI. Export to Google Drive." />
+    <meta property="og:image" content="https://yt-to-markdown.vercel.app/favicon.svg" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:url" content="https://yt-to-markdown.vercel.app/" />
+    <meta name="twitter:title" content="OmniScribe – YouTube to Markdown & Video Note Summarizer" />
+    <meta name="twitter:description" content="Convert YouTube videos and lectures into structured Markdown notes, timestamped summaries, formulas, and flashcards with AI. Export to Google Drive." />
+    <meta name="twitter:image" content="https://yt-to-markdown.vercel.app/favicon.svg" />
+
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Schema.org Structured Data (JSON-LD) for Search Engines -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebApplication",
+          "@id": "https://yt-to-markdown.vercel.app/#webapp",
+          "name": "OmniScribe - YouTube to Markdown",
+          "url": "https://yt-to-markdown.vercel.app/",
+          "applicationCategory": "EducationalApplication",
+          "operatingSystem": "All",
+          "description": "Convert YouTube videos and lectures into structured Markdown notes, timestamped chapter summaries, and study flashcards using AI. Supports instant Google Drive export.",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+          },
+          "featureList": [
+            "Convert any YouTube video to structured Markdown",
+            "Timestamped video chapter summaries",
+            "Visual OCR slide and equation extraction",
+            "LaTeX math formula rendering",
+            "One-click Google Drive export",
+            "Bring your own Gemini API key with client-side privacy"
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "@id": "https://yt-to-markdown.vercel.app/#faq",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "How do I convert a YouTube video to Markdown?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Paste any YouTube video URL into OmniScribe, choose your desired summary depth (Quick Summary, Comprehensive Study Guide, or Timestamped Chapters), and click Analyze. OmniScribe generates clean Markdown with headers, key takeaways, and code/math blocks."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Can I save generated notes directly to Google Drive?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes, OmniScribe includes built-in Google Drive integration. You can save your Markdown notes or Google Docs directly to your Drive account with one click."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Is my Gemini API key safe?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes. Your API key is stored only in your own browser (via localStorage or sessionStorage per your preference) protected by the browser Same-Origin Policy. It is never logged or stored on external servers."
+              }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased min-h-screen">
-    <div id="root"></div>
+    <div id="root">
+      <!-- Fallback content for search engine crawlers prior to JS hydration -->
+      <noscript>
+        <div style="padding: 2rem; font-family: sans-serif; max-width: 800px; margin: 0 auto;">
+          <h1>OmniScribe – YouTube to Markdown & Video Note Summarizer</h1>
+          <p>Convert any YouTube video into comprehensive Markdown notes, timestamped chapters, executive summaries, and study guides with Gemini AI.</p>
+          <h2>Features</h2>
+          <ul>
+            <li>Full transcript & multimodal lecture analysis</li>
+            <li>Clean Markdown formatting with tables, code, and LaTeX math</li>
+            <li>One-click export to Google Drive</li>
+            <li>Fast, privacy-focused, client-side key storage</li>
+          </ul>
+        </div>
+      </noscript>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

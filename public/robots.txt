@@ -1,0 +1,6 @@
+# Robots.txt for OmniScribe YouTube to Markdown
+User-agent: *
+Allow: /
+
+# Sitemap location
+Sitemap: https://yt-to-markdown.vercel.app/sitemap.xml
