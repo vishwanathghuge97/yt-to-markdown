@@ -41,10 +41,29 @@
     <meta name="twitter:description" content="Convert YouTube videos and lectures into structured Markdown notes, timestamped summaries, formulas, and flashcards with AI. Export to Google Drive." />
     <meta name="twitter:image" content="https://yt-to-markdown.vercel.app/favicon.svg" />
 
-    <!-- Fonts -->
+    <!-- Prevent Flash of Unstyled Content (FOUC) & Layout Shift -->
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('theme');
+          var isDark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (_) {}
+      })();
+    </script>
+
+    <!-- Fonts: Preconnected and asynchronously loaded to prevent blocking page layout -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" media="print" onload="this.media='all'">
+    <noscript>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+    </noscript>
 
     <!-- Schema.org Structured Data (JSON-LD) for Search Engines -->
     <script type="application/ld+json">
