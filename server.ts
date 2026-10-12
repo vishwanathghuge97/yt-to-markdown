@@ -15,13 +15,13 @@ const PORT = 3000;
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
-// Dynamic Gemini Client getter (prioritizes user-provided API key, falls back to server env)
+// Dynamic Gemini Client getter (strictly requires user-provided API key so server owner key is never exhausted)
 function getAiClient(userApiKey?: string): GoogleGenAI {
-  const key = (userApiKey && userApiKey.trim()) || process.env.GEMINI_API_KEY;
+  const key = userApiKey && userApiKey.trim();
   if (!key) {
-    throw new Error('No Gemini API key provided. Please click "API Key" in the top bar to provide your free Google Gemini API key.');
+    throw new Error('A personal Gemini API key is strictly required. Please click "Set API Key" in the top bar to provide your free Google Gemini API key.');
   }
-  return new GoogleGenAI({ apiKey: key.trim() });
+  return new GoogleGenAI({ apiKey: key });
 }
 
 /**

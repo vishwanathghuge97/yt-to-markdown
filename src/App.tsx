@@ -32,6 +32,7 @@ import {
   Terminal,
   ExternalLink,
   Layers,
+  Key,
 } from 'lucide-react';
 
 interface SegmentRoadmapItem {
@@ -154,6 +155,13 @@ export default function App() {
     e.preventDefault();
     const url = currentUrl.trim();
     if (!url || isAnalyzing) return;
+
+    // Strict BYOK verification: Every user must provide their own Gemini API key
+    if (!customApiKey || !customApiKey.trim()) {
+      setIsApiKeyModalOpen(true);
+      setInputError('A Gemini API key is required. Please click "Set API Key" or provide your free key below to generate markdown notes.');
+      return;
+    }
 
     // Strict YouTube link verification: Do NOT waste API resources on non-YouTube links
     const videoId = extractYouTubeVideoId(url);
@@ -453,9 +461,27 @@ export default function App() {
         {/* URL Input Form */}
         <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 sm:p-4 shadow-sm transition-colors">
           <form onSubmit={handleStartAnalysis} className="space-y-3">
+            {!customApiKey && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200">
+                <div className="flex items-center gap-2">
+                  <Key className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Bring Your Own Key (BYOK):</strong> Please provide your free Google Gemini API key to generate notes.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsApiKeyModalOpen(true)}
+                  className="px-2.5 py-1 text-xs font-mono font-medium rounded bg-amber-600 hover:bg-amber-700 text-white transition shrink-0 self-start sm:self-auto shadow-xs"
+                >
+                  Enter Free Key
+                </button>
+              </div>
+            )}
+
             {inputError && (
-              <div className="flex items-center gap-2 p-2.5 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 text-xs font-mono">
-                <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="flex items-center gap-2 p-2.5 rounded-md bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-300 text-xs font-mono">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
                 <span>{inputError}</span>
               </div>
             )}

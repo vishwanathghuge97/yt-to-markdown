@@ -75,11 +75,14 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         <form onSubmit={handleSave} className="p-5 space-y-4">
           <div className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed space-y-2">
             <p>
-              Your key is saved <strong>locally in your browser</strong> and never stored on any server database.
+              To protect server quotas, <strong>each visitor must provide their own Gemini API key</strong>.
+            </p>
+            <p>
+              Your key stays <strong>strictly in your browser's local storage</strong> and is sent only with your own requests. It is never saved in any database or shared with anyone.
             </p>
             <p className="text-[11px] text-zinc-500 dark:text-zinc-500 flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-              <span>Free tier gives 15 requests/min at zero cost from Google AI Studio.</span>
+              <span>Google AI Studio free tier provides 15 requests/min at no cost.</span>
             </p>
           </div>
 
