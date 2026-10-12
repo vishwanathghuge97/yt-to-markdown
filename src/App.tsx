@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
 import { Header } from './components/Header';
 import { DriveExportModal } from './components/DriveExportModal';
+import { ApiKeyModal } from './components/ApiKeyModal';
 import { MarkdownOutputView } from './components/MarkdownOutputView';
 import { FullAnalysisReport, ChunkAnalysisResult, VideoMetadata, ChunkBoundary } from './types/pipeline';
 import {
@@ -51,6 +52,24 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState('');
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
+  const [customApiKey, setCustomApiKey] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('gemini_custom_api_key') || '';
+    }
+    return '';
+  });
+
+  const handleSaveApiKey = (key: string) => {
+    setCustomApiKey(key);
+    if (typeof window !== 'undefined') {
+      if (key) {
+        localStorage.setItem('gemini_custom_api_key', key);
+      } else {
+        localStorage.removeItem('gemini_custom_api_key');
+      }
+    }
+  };
 
   // Custom Options State (Collapsible)
   const [showOptions, setShowOptions] = useState(false);
@@ -210,10 +229,17 @@ export default function App() {
 
       // 3. Generate cohesive curriculum roadmap
       let roadmap: SegmentRoadmapItem[] = [];
+      const apiHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (customApiKey) {
+        apiHeaders['x-gemini-api-key'] = customApiKey.trim();
+      }
+
       try {
         const roadmapRes = await fetch('/api/gemini/course-roadmap', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: apiHeaders,
           body: JSON.stringify({
             videoUrl: url,
             videoTitle,
@@ -222,6 +248,7 @@ export default function App() {
             numSegments: planned.length,
             creatorChapters,
             videoDescription: description + (customNotes ? `\nUser Notes: ${customNotes}` : ''),
+            apiKey: customApiKey || undefined,
           }),
         });
 
@@ -267,7 +294,7 @@ export default function App() {
         try {
           const res = await fetch('/api/gemini/analyze-chunk', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: apiHeaders,
             body: JSON.stringify({
               videoUrl: url,
               videoTitle,
@@ -279,6 +306,7 @@ export default function App() {
               keyTopicsHint: segmentInfo?.keyTopics,
               videoDescription: description,
               totalDurationSec: durationSec,
+              apiKey: customApiKey || undefined,
             }),
           });
 
@@ -336,12 +364,13 @@ export default function App() {
       try {
         const reduceRes = await fetch('/api/gemini/hierarchical-reduce', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: apiHeaders,
           body: JSON.stringify({
             videoUrl: url,
             videoTitle,
             channelTitle: authorName,
             durationSec,
+            apiKey: customApiKey || undefined,
             chapterSummaries: reduceOutput.chapters.map((c) => ({
               title: c.title,
               timeRange: c.timeRangeStr,
@@ -406,6 +435,17 @@ export default function App() {
         onOpenDriveModal={() => setIsDriveModalOpen(true)}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
+        apiKey={customApiKey}
+        onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
+      />
+
+      {/* API Key Modal */}
+      <ApiKeyModal
+        isOpen={isApiKeyModalOpen}
+        onClose={() => setIsApiKeyModalOpen(false)}
+        apiKey={customApiKey}
+        onSaveKey={handleSaveApiKey}
+        hasEnvKey={true}
       />
 
       {/* 2. Main Content */}

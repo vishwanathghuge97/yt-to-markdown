@@ -1,6 +1,6 @@
 import React from 'react';
 import { User } from 'firebase/auth';
-import { LogOut, HardDrive, Sun, Moon } from 'lucide-react';
+import { LogOut, HardDrive, Sun, Moon, Key } from 'lucide-react';
 import { googleSignIn, logout } from '../services/firebase';
 
 interface HeaderProps {
@@ -9,6 +9,8 @@ interface HeaderProps {
   onOpenDriveModal?: () => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
+  apiKey: string;
+  onOpenApiKeyModal: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -17,6 +19,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenDriveModal,
   darkMode,
   onToggleDarkMode,
+  apiKey,
+  onOpenApiKeyModal,
 }) => {
   const [isSigningIn, setIsSigningIn] = React.useState(false);
 
@@ -52,13 +56,34 @@ export const Header: React.FC<HeaderProps> = ({
               yt-to-markdown
             </span>
             <span className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500">
-              v1.1.0
+              v1.2.0
             </span>
           </div>
         </div>
 
         {/* Actions */}
         <div className="flex items-center space-x-2">
+          {/* API Key configuration button */}
+          <button
+            onClick={onOpenApiKeyModal}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-mono transition border ${
+              apiKey
+                ? 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60'
+            }`}
+            title="Configure your Gemini API key"
+          >
+            <Key className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">
+              {apiKey ? 'API Key Set' : 'Set API Key'}
+            </span>
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                apiKey ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'
+              }`}
+            />
+          </button>
+
           {/* Dark Mode */}
           <button
             onClick={onToggleDarkMode}

@@ -15,13 +15,13 @@ const PORT = 3000;
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
-// Dynamic Gemini Client getter (supports runtime env updates and serverless)
-function getAiClient(): GoogleGenAI {
-  const key = process.env.GEMINI_API_KEY;
+// Dynamic Gemini Client getter (prioritizes user-provided API key, falls back to server env)
+function getAiClient(userApiKey?: string): GoogleGenAI {
+  const key = (userApiKey && userApiKey.trim()) || process.env.GEMINI_API_KEY;
   if (!key) {
-    throw new Error('GEMINI_API_KEY is not configured in the environment.');
+    throw new Error('No Gemini API key provided. Please click "API Key" in the top bar to provide your free Google Gemini API key.');
   }
-  return new GoogleGenAI({ apiKey: key });
+  return new GoogleGenAI({ apiKey: key.trim() });
 }
 
 /**
@@ -93,9 +93,10 @@ function getCanonicalYouTubeUrl(input: string): string {
 async function generateWithCascade(
   contentsOrPrompt: string | any[],
   jsonMode = true,
-  videoUri?: string
+  videoUri?: string,
+  userApiKey?: string
 ): Promise<{ text: string; modelUsed: string }> {
-  const aiClient = getAiClient();
+  const aiClient = getAiClient(userApiKey);
 
   const models = ['gemini-2.5-flash', 'gemini-3.1-flash-lite'];
   const canonicalVideo = videoUri ? getCanonicalYouTubeUrl(videoUri) : undefined;
@@ -351,7 +352,8 @@ function formatTime(s: number) {
   // 2. Video Roadmap Endpoint (Chronological curriculum segments tailored to video length)
   app.post('/api/gemini/course-roadmap', async (req, res) => {
     try {
-      const { videoUrl, videoTitle, channelTitle, durationSec, numSegments, creatorChapters, videoDescription } = req.body;
+      const { videoUrl, videoTitle, channelTitle, durationSec, numSegments, creatorChapters, videoDescription, apiKey: bodyApiKey } = req.body;
+      const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
       const durationFormatted = formatTime(durationSec || 600);
       const isShort = (durationSec || 600) <= 600; // <= 10 mins
       const isMedium = (durationSec || 600) > 600 && (durationSec || 600) <= 3600;
@@ -396,7 +398,7 @@ Return strict JSON:
 }
 `;
 
-      const result = await generateWithCascade(prompt, true, videoUrl);
+      const result = await generateWithCascade(prompt, true, videoUrl, userApiKey);
       const parsed = cleanAndParseJson<{ roadmap: any[] }>(result.text);
       return res.json({ roadmap: parsed.roadmap || [] });
     } catch (err: any) {
@@ -418,7 +420,9 @@ Return strict JSON:
       keyTopicsHint,
       videoDescription,
       totalDurationSec,
+      apiKey: bodyApiKey,
     } = req.body;
+    const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
 
     const startFormatted = formatTime(nominalStartSec);
     const endFormatted = formatTime(nominalEndSec);
@@ -476,7 +480,7 @@ Return strict JSON:
 }
 `;
 
-      const genResult = await generateWithCascade(prompt, true, videoUrl);
+      const genResult = await generateWithCascade(prompt, true, videoUrl, userApiKey);
       const parsed = cleanAndParseJson<any>(genResult.text);
 
       return res.json({
@@ -522,7 +526,8 @@ Return strict JSON:
   // 4. Hierarchical Reducer (Synthesizes executive summary from chapters)
   app.post('/api/gemini/hierarchical-reduce', async (req, res) => {
     try {
-      const { videoUrl, videoTitle, channelTitle, chapterSummaries, durationSec } = req.body;
+      const { videoUrl, videoTitle, channelTitle, chapterSummaries, durationSec, apiKey: bodyApiKey } = req.body;
+      const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
       const isShort = durationSec && durationSec <= 600;
 
       const prompt = `
@@ -543,7 +548,7 @@ Return JSON:
 }
 `;
 
-      const result = await generateWithCascade(prompt, true, videoUrl);
+      const result = await generateWithCascade(prompt, true, videoUrl, userApiKey);
       const parsed = cleanAndParseJson<any>(result.text);
       return res.json(parsed);
     } catch (err: any) {
