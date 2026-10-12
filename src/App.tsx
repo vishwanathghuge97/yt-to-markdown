@@ -341,7 +341,29 @@ export default function App() {
           }
 
           const data = await res.json();
-          const analysisResult: ChunkAnalysisResult = data.result;
+          const rawResult = data.result || {};
+          const analysisResult: ChunkAnalysisResult = {
+            chunkIndex: rawResult.chunkIndex ?? i,
+            startSec: rawResult.startSec ?? chunk.nominalStartSec,
+            endSec: rawResult.endSec ?? chunk.nominalEndSec,
+            summary: rawResult.summary || data.markdown || `Summary for ${timeSpan}`,
+            keyTakeaways: Array.isArray(rawResult.keyTakeaways) ? rawResult.keyTakeaways : [],
+            transcript: Array.isArray(rawResult.transcript) && rawResult.transcript.length > 0
+              ? rawResult.transcript
+              : [
+                  {
+                    id: `chunk-${i}-t-0`,
+                    startSec: chunk.nominalStartSec,
+                    endSec: chunk.nominalEndSec,
+                    timestampStr: formatTimestamp(chunk.nominalStartSec),
+                    speaker: authorName || 'Speaker',
+                    text: rawResult.summary || data.markdown || segTitle,
+                    chunkIndex: i,
+                  },
+                ],
+            visualObservations: Array.isArray(rawResult.visualObservations) ? rawResult.visualObservations : [],
+            scientificEntities: [],
+          };
           chunkResults.push(analysisResult);
 
           // Deduplicate overlap with previous chunk

@@ -120,7 +120,7 @@ export async function saveMarkdownToDrive(
 }
 
 /**
- * Fetches recent files exported to the OmniScribe folder
+ * Fetches recent files exported to the yt-to-markdown notes folder
  */
 export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
   const token = await getAccessToken();

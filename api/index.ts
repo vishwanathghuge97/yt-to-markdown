@@ -410,38 +410,119 @@ router.post('/gemini/analyze-chunk', async (req, res) => {
       videoUrl,
       videoTitle,
       channelTitle,
+      chunkIndex: bodyChunkIndex,
       segmentIndex,
-      totalSegments,
-      nominalStartSec,
-      nominalEndSec,
-      roadmapItem,
+      nominalStartSec = 0,
+      nominalEndSec = 60,
+      topicContextHint,
+      keyTopicsHint,
+      videoDescription,
       apiKey: bodyApiKey,
     } = req.body;
 
+    const chunkIndex = bodyChunkIndex ?? segmentIndex ?? 0;
     const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
     const startFormatted = formatTime(nominalStartSec);
     const endFormatted = formatTime(nominalEndSec);
+    const chunkSpanSec = Math.max(1, nominalEndSec - nominalStartSec);
 
     const prompt = `
-You are creating a comprehensive, high-quality Markdown study guide and transcript notes for a specific segment of this video.
-Video Title: "${videoTitle}"
-Channel: "${channelTitle}"
-Segment: #${segmentIndex + 1} of ${totalSegments} [${startFormatted} - ${endFormatted}]
-${roadmapItem ? `Segment Topic: "${roadmapItem.title}"` : ''}
-Video URL: ${videoUrl}
+CRITICAL INSTRUCTION - STRICT FACTUAL ACCURACY (ZERO HALLUCINATION):
+You are transcribing and documenting the EXACT video segment [${startFormatted} - ${endFormatted}] (duration: ${chunkSpanSec}s) of:
+Video URL: ${videoUrl || 'YouTube Video'}
+Title: "${videoTitle}"
+Channel / Speaker: "${channelTitle || 'Speaker'}"
+Segment Subject / Focus: ${topicContextHint || `Segment ${chunkIndex + 1}`}
+${keyTopicsHint ? `Key topics: ${JSON.stringify(keyTopicsHint)}` : ''}
+${videoDescription ? `Video Context: ${videoDescription.slice(0, 500)}` : ''}
 
-Analyze what is explained, demonstrated, coded, or discussed between ${startFormatted} and ${endFormatted}.
+STRICT ACCURACY RULES:
+1. ONLY transcribe or summarize dialogue, explanations, or music that actually occur in this video window.
+2. ONLY describe visuals that are actually shown on screen (code editor, terminal, browser, slides, physical scene).
+3. If code or commands are shown, transcribe them into extractedTextOrCode.
+4. Summary: Concise, factual overview of what occurs between ${startFormatted} and ${endFormatted}.
+5. Key Takeaways: 2 to 3 factual takeaways or key learning points.
 
-Write structured Markdown notes for this segment:
-- Use ## Heading with timestamp (e.g. ## [${startFormatted}] Topic Name)
-- Provide clear explanation of concepts, steps, or code presented
-- Include bullet points for key takeaways
-- If code, equations, or commands are shown, include clean markdown code blocks (\`\`\`)
-- Factual and concise.
+Return strict JSON format:
+{
+  "summary": "Factual overview of what occurs from ${startFormatted} to ${endFormatted}",
+  "keyTakeaways": [
+    "Factual key takeaway 1",
+    "Factual key takeaway 2"
+  ],
+  "transcript": [
+    {
+      "startSec": ${nominalStartSec},
+      "endSec": ${Math.min(nominalEndSec, nominalStartSec + Math.max(20, Math.floor(chunkSpanSec / 2)))},
+      "timestampStr": "${startFormatted}",
+      "speaker": "${channelTitle || 'Speaker'}",
+      "text": "Factual dialogue, code explanation, or demonstration spoken or presented in this segment."
+    }
+  ],
+  "visualObservations": [
+    {
+      "timestampSec": ${nominalStartSec + Math.floor(chunkSpanSec / 3)},
+      "timestampStr": "${formatTime(nominalStartSec + Math.floor(chunkSpanSec / 3))}",
+      "type": "demo",
+      "headline": "Visual event or screen demonstration",
+      "extractedTextOrCode": "",
+      "description": "Factual description of what is displayed on screen"
+    }
+  ]
+}
 `;
 
-    const result = await generateWithCascade(prompt, false, videoUrl, userApiKey);
-    return res.json({ markdown: result.text, modelUsed: result.modelUsed });
+    const genResult = await generateWithCascade(prompt, true, videoUrl, userApiKey);
+    const parsed = cleanAndParseJson<any>(genResult.text);
+
+    const transcriptList = Array.isArray(parsed.transcript) && parsed.transcript.length > 0
+      ? parsed.transcript.map((t: any, i: number) => ({
+          id: `chunk-${chunkIndex}-t-${i}`,
+          startSec: t.startSec ?? nominalStartSec,
+          endSec: t.endSec ?? Math.min(nominalEndSec, nominalStartSec + 30),
+          timestampStr: t.timestampStr || formatTime(t.startSec || nominalStartSec),
+          speaker: t.speaker || channelTitle || 'Speaker',
+          text: t.text || '',
+          chunkIndex,
+        }))
+      : [
+          {
+            id: `chunk-${chunkIndex}-t-0`,
+            startSec: nominalStartSec,
+            endSec: nominalEndSec,
+            timestampStr: startFormatted,
+            speaker: channelTitle || 'Speaker',
+            text: parsed.summary || `Walkthrough and notes for [${startFormatted} - ${endFormatted}].`,
+            chunkIndex,
+          },
+        ];
+
+    const visualList = Array.isArray(parsed.visualObservations)
+      ? parsed.visualObservations.map((v: any, i: number) => ({
+          id: `chunk-${chunkIndex}-v-${i}`,
+          timestampSec: v.timestampSec ?? nominalStartSec,
+          timestampStr: v.timestampStr || formatTime(v.timestampSec || nominalStartSec),
+          type: v.type || 'demo',
+          headline: v.headline || 'Visual Event',
+          extractedTextOrCode: v.extractedTextOrCode || '',
+          description: v.description || '',
+          chunkIndex,
+        }))
+      : [];
+
+    return res.json({
+      modelUsed: genResult.modelUsed,
+      result: {
+        chunkIndex,
+        startSec: nominalStartSec,
+        endSec: nominalEndSec,
+        summary: parsed.summary || `Analysis for ${startFormatted} - ${endFormatted}.`,
+        keyTakeaways: Array.isArray(parsed.keyTakeaways) ? parsed.keyTakeaways : [],
+        transcript: transcriptList,
+        visualObservations: visualList,
+        scientificEntities: [],
+      },
+    });
   } catch (err: any) {
     console.warn('Analyze chunk error:', err);
     return res.status(500).json({ error: err.message });
