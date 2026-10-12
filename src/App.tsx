@@ -26,7 +26,6 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
-  SlidersHorizontal,
   ChevronDown,
   ChevronUp,
   Terminal,
@@ -88,12 +87,6 @@ export default function App() {
       }
     }
   };
-
-  // Custom Options State (Collapsible)
-  const [showOptions, setShowOptions] = useState(false);
-  const [customHours, setCustomHours] = useState<string>('');
-  const [customMinutes, setCustomMinutes] = useState<string>('');
-  const [customNotes, setCustomNotes] = useState<string>('');
 
   const [inputError, setInputError] = useState('');
   const [currentVideoMeta, setCurrentVideoMeta] = useState<VideoMetadata | null>(null);
@@ -233,17 +226,6 @@ export default function App() {
       if (info.description) description = info.description;
       if (Array.isArray(info.creatorChapters)) creatorChapters = info.creatorChapters;
 
-      // Check if user manually specified duration override
-      if (customHours || customMinutes) {
-        const h = parseInt(customHours, 10) || 0;
-        const m = parseInt(customMinutes, 10) || 0;
-        const total = h * 3600 + m * 60;
-        if (total > 60) {
-          durationSec = total;
-          addLog(`Applied user duration override: ${formatTimestamp(durationSec)}`);
-        }
-      }
-
       addLog(`Video: "${videoTitle}" by ${authorName}`);
       addLog(`Duration: ${formatTimestamp(durationSec)} (${durationSec}s)`);
 
@@ -286,7 +268,7 @@ export default function App() {
             durationSec,
             numSegments: planned.length,
             creatorChapters,
-            videoDescription: description + (customNotes ? `\nUser Notes: ${customNotes}` : ''),
+            videoDescription: description,
             apiKey: customApiKey || undefined,
           }),
         });
@@ -573,68 +555,6 @@ export default function App() {
                   </>
                 )}
               </button>
-            </div>
-
-            {/* Collapsible Advanced Options */}
-            <div className="pt-0.5">
-              <button
-                type="button"
-                onClick={() => setShowOptions(!showOptions)}
-                className="text-xs font-mono text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 flex items-center gap-1.5 transition py-1 touch-manipulation"
-              >
-                <SlidersHorizontal className="w-3 h-3" />
-                <span>{showOptions ? 'Hide video options' : 'Video options (duration override / notes)'}</span>
-                {showOptions ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-              </button>
-
-              {showOptions && (
-                <div className="mt-2.5 p-3 bg-zinc-50 dark:bg-zinc-950/60 rounded border border-zinc-200 dark:border-zinc-800/80 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <label className="block text-[11px] font-mono text-zinc-600 dark:text-zinc-400 mb-1">
-                      Duration override (optional):
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="number"
-                          min="0"
-                          max="24"
-                          placeholder="8"
-                          value={customHours}
-                          onChange={(e) => setCustomHours(e.target.value)}
-                          className="w-16 h-9 px-2 py-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs sm:text-sm text-center"
-                        />
-                        <span className="text-zinc-500 text-[11px]">hrs</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="number"
-                          min="0"
-                          max="59"
-                          placeholder="00"
-                          value={customMinutes}
-                          onChange={(e) => setCustomMinutes(e.target.value)}
-                          className="w-16 h-9 px-2 py-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs sm:text-sm text-center"
-                        />
-                        <span className="text-zinc-500 text-[11px]">mins</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-mono text-zinc-600 dark:text-zinc-400 mb-1">
-                      Context / Instructor notes (optional):
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Node.js Express crash course"
-                      value={customNotes}
-                      onChange={(e) => setCustomNotes(e.target.value)}
-                      className="w-full h-9 px-2.5 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs sm:text-sm"
-                    />
-                  </div>
-                </div>
-              )}
             </div>
           </form>
         </div>
