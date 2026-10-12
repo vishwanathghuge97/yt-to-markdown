@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Key, Check, ExternalLink, X, ShieldCheck } from 'lucide-react';
+import { Key, Eye, EyeOff, Check, ExternalLink, X, ShieldCheck, Plus, Trash2 } from 'lucide-react';
 
 interface ApiKeyModalProps {
   isOpen: boolean;
@@ -18,14 +18,18 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
   hasEnvKey,
   initialPersist = true,
 }) => {
-  const [inputVal, setInputVal] = useState(apiKey);
+  const [keyValues, setKeyValues] = useState<string[]>(['']);
+  const [visibleKeys, setVisibleKeys] = useState<Record<number, boolean>>({});
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [persistLocally, setPersistLocally] = useState(initialPersist);
 
   // Sync state when opened
   React.useEffect(() => {
     if (isOpen) {
-      setInputVal(apiKey);
+      setKeyValues(apiKey.split('\n').map((key) => key.trim()).filter(Boolean).length > 0
+        ? apiKey.split('\n').map((key) => key.trim()).filter(Boolean)
+        : ['']);
+      setVisibleKeys({});
       setSavedSuccess(false);
       setPersistLocally(initialPersist);
     }
@@ -35,8 +39,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = inputVal.trim();
-    onSaveKey(clean, persistLocally);
+    onSaveKey(keyValues.join('\n'), persistLocally);
     setSavedSuccess(true);
     setTimeout(() => {
       onClose();
@@ -44,7 +47,8 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
   };
 
   const handleClear = () => {
-    setInputVal('');
+    setKeyValues(['']);
+    setVisibleKeys({});
     onSaveKey('', false);
   };
 
@@ -94,17 +98,49 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
 
           <div>
             <label className="block text-xs font-mono font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-              API Keys (one per line):
+              Gemini API Keys
             </label>
-            <div className="relative">
-              <textarea
-                value={inputVal}
-                onChange={(e) => setInputVal(e.target.value)}
-                placeholder={'AIzaSy...\nAIzaSy...'}
-                rows={4}
-                spellCheck={false}
-                className="w-full px-3 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-lg text-base sm:text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400 resize-y"
-              />
+            <div className="space-y-2">
+              {keyValues.map((key, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type={visibleKeys[index] ? 'text' : 'password'}
+                      value={key}
+                      onChange={(e) => setKeyValues((current) => current.map((item, i) => i === index ? e.target.value : item))}
+                      placeholder="AIzaSy..."
+                      spellCheck={false}
+                      className="w-full pl-3 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-lg text-base sm:text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400"
+                      aria-label={`Gemini API key ${index + 1}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setVisibleKeys((current) => ({ ...current, [index]: !current[index] }))}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 p-1"
+                      aria-label={visibleKeys[index] ? 'Hide API key' : 'Show API key'}
+                    >
+                      {visibleKeys[index] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setKeyValues((current) => current.length > 1 ? current.filter((_, i) => i !== index) : [''])}
+                    className="p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition"
+                    aria-label={`Remove API key ${index + 1}`}
+                    title="Remove key"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => setKeyValues((current) => [...current, ''])}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-dashed border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-mono transition"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add another key
+              </button>
             </div>
           </div>
 
@@ -156,7 +192,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
               <ExternalLink className="w-3 h-3" />
             </a>
 
-            {inputVal && (
+            {keyValues.some((key) => key.trim()) && (
               <button
                 type="button"
                 onClick={handleClear}
