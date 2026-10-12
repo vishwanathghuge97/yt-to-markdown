@@ -529,6 +529,96 @@ Return strict JSON format:
   }
 });
 
+// 3.5 Unified Fast Full Notes Endpoint (Single-pass execution: 10-15s total)
+router.post('/gemini/generate-full-notes', async (req, res) => {
+  try {
+    const {
+      videoUrl,
+      videoTitle,
+      channelTitle,
+      durationSec = 600,
+      creatorChapters = [],
+      videoDescription = '',
+      apiKey: bodyApiKey,
+    } = req.body;
+
+    const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
+    const durationFormatted = formatTime(durationSec);
+    const hasCreatorChapters = Array.isArray(creatorChapters) && creatorChapters.length > 1;
+
+    const prompt = `
+CRITICAL INSTRUCTION - COMPREHENSIVE FACTUAL VIDEO NOTEBOOK & STUDY GUIDE:
+You are an expert technical note-taker and documentation engineer.
+Analyze this video:
+URL: ${videoUrl || 'YouTube Video'}
+Title: "${videoTitle}"
+Channel / Presenter: "${channelTitle || 'Speaker'}"
+Duration: ${durationFormatted} (${durationSec} seconds)
+
+${hasCreatorChapters ? `Creator Chapters Provided:\n${JSON.stringify(creatorChapters, null, 2)}\n` : ''}
+${videoDescription ? `Video Context / Description:\n"""\n${videoDescription.slice(0, 1000)}\n"""\n` : ''}
+
+TASK:
+Produce a comprehensive, rigorous study guide and notes covering the ENTIRE video.
+Extract core concepts, chronological chapters with exact timestamps, code snippets/equations, key takeaways, and visual demonstrations.
+
+Return STRICT JSON:
+{
+  "executiveSummary": "A concise, high-density summary (2-4 sentences) capturing the core purpose and thesis of the entire video.",
+  "keyTakeaways": [
+    "Key takeaway 1 (direct actionable insight)",
+    "Key takeaway 2",
+    "Key takeaway 3"
+  ],
+  "chapters": [
+    {
+      "chapterIndex": 1,
+      "title": "Clear Topic Title",
+      "startSec": 0,
+      "endSec": 300,
+      "timeRangeStr": "00:00 - 05:00",
+      "overview": "Detailed walkthrough of what is taught and demonstrated in this section.",
+      "keyConcepts": [
+        "Concept or command explained",
+        "Important rule or detail"
+      ]
+    }
+  ],
+  "visualObservations": [
+    {
+      "timestampSec": 120,
+      "timestampStr": "02:00",
+      "type": "demo",
+      "headline": "Screen demonstration or code",
+      "extractedTextOrCode": "Exact code snippet or terminal command shown (or empty string)",
+      "description": "What is visible on screen"
+    }
+  ],
+  "transcript": [
+    {
+      "startSec": 0,
+      "endSec": 60,
+      "timestampStr": "00:00",
+      "speaker": "${channelTitle || 'Speaker'}",
+      "text": "Core spoken points or introduction."
+    }
+  ]
+}
+`;
+
+    const genResult = await generateWithCascade(prompt, true, videoUrl, userApiKey);
+    const parsed = cleanAndParseJson<any>(genResult.text);
+
+    return res.json({
+      modelUsed: genResult.modelUsed,
+      result: parsed,
+    });
+  } catch (err: any) {
+    console.warn('Generate full notes error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // 4. Hierarchical Reduce Endpoint
 router.post('/gemini/hierarchical-reduce', async (req, res) => {
   try {

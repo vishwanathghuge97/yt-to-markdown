@@ -248,19 +248,136 @@ export default function App() {
       // 2. Plan chunks adaptively based on real duration
       const planned = planChunkBoundaries(durationSec);
       setPlannedChunks(planned);
-      addLog(`Planned ${planned.length} chronological analysis segments (proportional to ${formatTimestamp(durationSec)}).`);
 
-      setProgressPercent(15);
-      setStatusMessage(`Analyzing structure and curriculum roadmap for "${videoTitle}"...`);
-
-      // 3. Generate cohesive curriculum roadmap
-      let roadmap: SegmentRoadmapItem[] = [];
       const apiHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
       };
       if (customApiKey) {
         apiHeaders['x-gemini-api-key'] = customApiKey.trim();
       }
+
+      let generatedReport: FullAnalysisReport | null = null;
+
+      // 3. Fast Unified Generation (Single-pass, 10-15s total)
+      try {
+        setProgressPercent(25);
+        setStatusMessage(`Generating structured notes & Markdown for "${videoTitle}"...`);
+        addLog(`Analyzing video stream with Gemini AI (Fast Single-Pass Pipeline)...`);
+
+        const fastRes = await fetch('/api/gemini/generate-full-notes', {
+          method: 'POST',
+          headers: apiHeaders,
+          body: JSON.stringify({
+            videoUrl: url,
+            videoTitle,
+            channelTitle: authorName,
+            durationSec,
+            creatorChapters,
+            videoDescription: description,
+            apiKey: customApiKey || undefined,
+          }),
+        });
+
+        if (fastRes.ok) {
+          const fastData = await fastRes.json();
+          const r = fastData.result || {};
+
+          if (r.executiveSummary || (Array.isArray(r.chapters) && r.chapters.length > 0)) {
+            setProgressPercent(85);
+            setStatusMessage('Compiling final Markdown document...');
+
+            const rawChapters: any[] = Array.isArray(r.chapters) && r.chapters.length > 0 ? r.chapters : [
+              {
+                chapterIndex: 1,
+                title: videoTitle,
+                startSec: 0,
+                endSec: durationSec,
+                timeRangeStr: `00:00 - ${formatTimestamp(durationSec)}`,
+                coveredChunks: [0],
+                overview: r.executiveSummary || 'Video walkthrough and summary notes.',
+                keyConcepts: r.keyTakeaways || [],
+                scientificHighlights: [],
+              },
+            ];
+
+            const formattedChapters: ChapterCluster[] = rawChapters.map((c: any, idx: number) => ({
+              chapterIndex: c.chapterIndex ?? idx + 1,
+              title: c.title || `Chapter ${idx + 1}`,
+              startSec: c.startSec ?? 0,
+              endSec: c.endSec ?? durationSec,
+              timeRangeStr: c.timeRangeStr || `${formatTimestamp(c.startSec || 0)} - ${formatTimestamp(c.endSec || durationSec)}`,
+              coveredChunks: [idx],
+              overview: c.overview || '',
+              keyConcepts: Array.isArray(c.keyConcepts) ? c.keyConcepts : [],
+              scientificHighlights: [],
+            }));
+
+            const formattedTranscript = Array.isArray(r.transcript) ? r.transcript.map((t: any, idx: number) => ({
+              id: `fast-t-${idx}`,
+              startSec: t.startSec ?? 0,
+              endSec: t.endSec ?? 30,
+              timestampStr: t.timestampStr || formatTimestamp(t.startSec || 0),
+              speaker: t.speaker || authorName || 'Speaker',
+              text: t.text || '',
+              chunkIndex: 0,
+            })) : [];
+
+            const formattedVisuals = Array.isArray(r.visualObservations) ? r.visualObservations.map((v: any, idx: number) => ({
+              id: `fast-v-${idx}`,
+              timestampSec: v.timestampSec ?? 0,
+              timestampStr: v.timestampStr || formatTimestamp(v.timestampSec || 0),
+              type: v.type || 'demo',
+              headline: v.headline || 'Visual Note',
+              extractedTextOrCode: v.extractedTextOrCode || '',
+              description: v.description || '',
+              chunkIndex: 0,
+            })) : [];
+
+            generatedReport = {
+              metadata: currentMetadata,
+              config: {
+                chunkDurationSec: 2400,
+                overlapSec: 20,
+                mediaResolution: 'high',
+                totalChunks: planned.length,
+                totalTokens: 300000,
+                directYouTubeMode: true,
+              },
+              executiveSummary: r.executiveSummary || 'Executive summary compiled from video.',
+              keyTakeaways: Array.isArray(r.keyTakeaways) && r.keyTakeaways.length > 0 ? r.keyTakeaways : ['Key takeaways extracted.'],
+              chapters: formattedChapters,
+              transcript: formattedTranscript,
+              visualObservations: formattedVisuals,
+              scientificEntities: [],
+              literatureMatches: [],
+              markdownContent: '',
+              generatedAt: new Date().toISOString(),
+            };
+
+            generatedReport.markdownContent = generateMarkdownReport(generatedReport);
+            setPlannedChunks((prev) => prev.map((c) => ({ ...c, status: 'completed' })));
+            addLog(`✓ Fast analysis complete! Generated ${formattedChapters.length} chapters and ${generatedReport.keyTakeaways.length} key takeaways.`);
+          }
+        }
+      } catch (fastErr: any) {
+        addLog(`Fast pass notice: ${fastErr.message}. Running fallback chapter analysis...`);
+      }
+
+      // If fast pass succeeded, set report immediately!
+      if (generatedReport) {
+        setReport(generatedReport);
+        setProgressPercent(100);
+        setStatusMessage('Markdown generation complete!');
+        addLog(`Markdown document created successfully (${generatedReport.markdownContent.split('\n').length} lines).`);
+        return;
+      }
+
+      // Fallback: Multi-segment analysis
+      addLog(`Planned ${planned.length} chronological analysis segments (proportional to ${formatTimestamp(durationSec)}).`);
+      setProgressPercent(15);
+      setStatusMessage(`Analyzing structure and curriculum roadmap for "${videoTitle}"...`);
+
+      let roadmap: SegmentRoadmapItem[] = [];
 
       try {
         const roadmapRes = await fetch('/api/gemini/course-roadmap', {
