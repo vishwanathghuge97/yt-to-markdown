@@ -355,8 +355,11 @@ export default function App() {
             };
 
             generatedReport.markdownContent = generateMarkdownReport(generatedReport);
-            setPlannedChunks((prev) => prev.map((c) => ({ ...c, status: 'completed' })));
-            addLog(`✓ Fast analysis complete! Generated ${formattedChapters.length} chapters and ${generatedReport.keyTakeaways.length} key takeaways.`);
+            addLog(
+              fastData.hasOfficialTranscript
+                ? `✓ Extracted verified official YouTube transcript (${formattedTranscript.length} dialogue entries) with ${formattedChapters.length} chapters!`
+                : `✓ Complete analysis finished with ${formattedTranscript.length} timestamped transcript entries and ${formattedChapters.length} chapters.`
+            );
           }
         }
       } catch (fastErr: any) {

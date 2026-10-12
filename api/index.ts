@@ -1,8 +1,63 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import { YoutubeTranscript } from 'youtube-transcript';
 
 dotenv.config();
+
+function groupRawCaptions(rawCaptions: any[], speaker: string): any[] {
+  if (!rawCaptions || rawCaptions.length === 0) return [];
+
+  const grouped: any[] = [];
+  let currentStart = Math.floor(rawCaptions[0].offset / 1000);
+  let currentTexts: string[] = [];
+  let lastEnd = currentStart;
+
+  for (const cap of rawCaptions) {
+    const startSec = Math.floor(cap.offset / 1000);
+    const endSec = Math.floor((cap.offset + cap.duration) / 1000);
+    const cleanText = (cap.text || '')
+      .replace(/&amp;/g, '&')
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/\n/g, ' ')
+      .trim();
+
+    if (!cleanText) continue;
+
+    if (startSec - currentStart >= 25 || currentTexts.join(' ').split(/\s+/).length >= 50) {
+      if (currentTexts.length > 0) {
+        grouped.push({
+          id: `grouped-cap-${grouped.length}`,
+          startSec: currentStart,
+          endSec: lastEnd,
+          timestampStr: formatTime(currentStart),
+          speaker,
+          text: currentTexts.join(' '),
+        });
+      }
+      currentStart = startSec;
+      currentTexts = [cleanText];
+      lastEnd = endSec;
+    } else {
+      currentTexts.push(cleanText);
+      lastEnd = Math.max(lastEnd, endSec);
+    }
+  }
+
+  if (currentTexts.length > 0) {
+    grouped.push({
+      id: `grouped-cap-${grouped.length}`,
+      startSec: currentStart,
+      endSec: lastEnd,
+      timestampStr: formatTime(currentStart),
+      speaker,
+      text: currentTexts.join(' '),
+    });
+  }
+
+  return grouped;
+}
 
 const app = express();
 
@@ -546,6 +601,25 @@ router.post('/gemini/generate-full-notes', async (req, res) => {
     const durationFormatted = formatTime(durationSec);
     const hasCreatorChapters = Array.isArray(creatorChapters) && creatorChapters.length > 1;
 
+    // 1. Attempt to fetch authentic official YouTube captions
+    const videoId = extractYouTubeVideoId(videoUrl);
+    let officialTranscript: any[] = [];
+    if (videoId) {
+      try {
+        const rawCaptions = await YoutubeTranscript.fetchTranscript(videoId);
+        if (Array.isArray(rawCaptions) && rawCaptions.length > 0) {
+          officialTranscript = groupRawCaptions(rawCaptions, channelTitle || 'Speaker');
+        }
+      } catch (_err) {
+        // Captions disabled or unavailable on YouTube; Gemini will transcribe from the video
+      }
+    }
+
+    const hasOfficialTranscript = officialTranscript.length > 0;
+    const transcriptExcerpt = hasOfficialTranscript
+      ? `\nOfficial Verified YouTube Transcript:\n${officialTranscript.slice(0, 40).map((t) => `[${t.timestampStr}] ${t.text}`).join('\n')}\n`
+      : '';
+
     const prompt = `
 CRITICAL INSTRUCTION - COMPREHENSIVE FACTUAL VIDEO NOTEBOOK & STUDY GUIDE:
 You are an expert technical note-taker and documentation engineer.
@@ -557,10 +631,20 @@ Duration: ${durationFormatted} (${durationSec} seconds)
 
 ${hasCreatorChapters ? `Creator Chapters Provided:\n${JSON.stringify(creatorChapters, null, 2)}\n` : ''}
 ${videoDescription ? `Video Context / Description:\n"""\n${videoDescription.slice(0, 1000)}\n"""\n` : ''}
+${transcriptExcerpt}
 
 TASK:
 Produce a comprehensive, rigorous study guide and notes covering the ENTIRE video.
-Extract core concepts, chronological chapters with exact timestamps, code snippets/equations, key takeaways, and visual demonstrations.
+Extract core concepts, chronological chapters with exact timestamps, code snippets/equations, key takeaways, visual demonstrations, and timestamped transcript.
+
+${
+  hasOfficialTranscript
+    ? `NOTE: Official YouTube captions were detected and will be used. Ensure chapters, key takeaways, and visual code blocks are deeply detailed.`
+    : `MANDATORY TRANSCRIPT DENSITY REQUIREMENT:
+You MUST provide a comprehensive, dense chronological transcript covering the ENTIRE duration of this video from 00:00 to ${durationFormatted}.
+Produce at least 12 to 25 continuous timestamped entries (every 30 to 60 seconds) capturing the actual dialogue, explanations, code walkthrough, and instructions spoken by ${channelTitle || 'the speaker'}.
+Do NOT provide only 2 or 3 lines. The transcript must span across all sections from start to finish.`
+}
 
 Return STRICT JSON:
 {
@@ -568,7 +652,8 @@ Return STRICT JSON:
   "keyTakeaways": [
     "Key takeaway 1 (direct actionable insight)",
     "Key takeaway 2",
-    "Key takeaway 3"
+    "Key takeaway 3",
+    "Key takeaway 4"
   ],
   "chapters": [
     {
@@ -597,10 +682,10 @@ Return STRICT JSON:
   "transcript": [
     {
       "startSec": 0,
-      "endSec": 60,
+      "endSec": 45,
       "timestampStr": "00:00",
       "speaker": "${channelTitle || 'Speaker'}",
-      "text": "Core spoken points or introduction."
+      "text": "Detailed spoken points or dialogue."
     }
   ]
 }
@@ -609,9 +694,15 @@ Return STRICT JSON:
     const genResult = await generateWithCascade(prompt, true, videoUrl, userApiKey);
     const parsed = cleanAndParseJson<any>(genResult.text);
 
+    // If official captions were retrieved, use the 100% genuine transcript!
+    if (hasOfficialTranscript && officialTranscript.length > 0) {
+      parsed.transcript = officialTranscript;
+    }
+
     return res.json({
       modelUsed: genResult.modelUsed,
       result: parsed,
+      hasOfficialTranscript,
     });
   } catch (err: any) {
     console.warn('Generate full notes error:', err);
