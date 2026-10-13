@@ -27,7 +27,7 @@ function groupRawCaptions(rawCaptions: any[], speaker: string): any[] {
     if (!cleanText) continue;
 
     const wordCount = cleanText.split(/\s+/).length;
-    if (startSec - currentStart >= 25 || currentWordCount + wordCount >= 50) {
+    if (startSec - currentStart >= 16 || currentWordCount + wordCount >= 32) {
       if (currentTexts.length > 0) {
         grouped.push({
           id: `grouped-cap-${grouped.length}`,
@@ -377,14 +377,14 @@ async function generateWithCascade(
           }
         } catch (err: any) {
           const msg = String(err?.message || '');
-          const isTransient = /503|high demand|unavailable|429|rate limit|quota|timeout|timed out/i.test(msg);
+          const isBusy = /503|high demand|unavailable|429|rate limit|quota/i.test(msg);
           console.warn(`Model ${model} attempt ${attempt + 1} with video attachment failed: ${msg}.`);
           lastError = err;
-          if (isTransient && attempt === 0) {
+          if (isBusy && attempt === 0) {
             await new Promise((r) => setTimeout(r, 1200));
             continue;
           }
-          break; // Move to next candidate model
+          break; // If timed out or on second attempt, move immediately to next candidate model
         }
       }
     }
@@ -435,10 +435,10 @@ async function generateWithCascade(
         }
       } catch (err: any) {
         const msg = String(err?.message || '');
-        const isTransient = /503|high demand|unavailable|429|rate limit|quota|timeout|timed out/i.test(msg);
+        const isBusy = /503|high demand|unavailable|429|rate limit|quota/i.test(msg);
         console.warn(`Model ${model} text attempt ${attempt + 1} failed: ${msg}.`);
         lastError = err;
-        if (isTransient && attempt === 0) {
+        if (isBusy && attempt === 0) {
           await new Promise((r) => setTimeout(r, 1200));
           continue;
         }
@@ -746,15 +746,15 @@ Segment Subject / Focus: ${topicContextHint || `Segment ${chunkIndex + 1}`}
 ${keyTopicsHint ? `Key topics: ${JSON.stringify(keyTopicsHint)}` : ''}
 ${videoDescription ? `Video Context: ${videoDescription.slice(0, 500)}` : ''}
 
-STRICT ACCURACY RULES:
+STRICT ACCURACY & TECHNICAL FIDELITY RULES:
 1. ONLY transcribe or summarize dialogue, explanations, or music that actually occur in this video window.
-2. ONLY describe visuals that are actually shown on screen (code editor, terminal, browser, slides, physical scene).
-3. If code or commands are shown, transcribe them into extractedTextOrCode.
-4. Summary: Concise, factual overview of what occurs between ${startFormatted} and ${endFormatted}.
-5. Key Takeaways: 2 to 3 factual takeaways or key learning points.
-6. Never infer hidden content, speaker intent, code, equations, identities, or events from context.
-7. If audio is unclear or a visual cannot be read confidently, write "Not clearly observable" instead of guessing.
-8. Return an empty visualObservations array when no meaningful visual event is clearly observable.
+2. TECHNICAL FIDELITY & EXACT SYNTAX: For programming, tech, mathematics, or tutorial videos, capture exact code syntax, function and parameter names, terminal commands with flags, APIs, HTTP methods, and library identifiers verbatim. Format inline code, identifiers, and CLI commands in markdown backticks (\` \`) (e.g. \`req.body\`, \`next()\`, \`express.json()\`, \`git commit\`).
+3. CODE & SCREEN EXTRACTION: When a code editor, terminal, or architecture diagram is visible on screen, extract the code accurately into visualObservations.extractedTextOrCode.
+4. DETAILED STEP-BY-STEP TRANSCRIPT: Provide a comprehensive, chronological list of distinct transcript dialogue entries (aim for 4 to 8 granular timestamped entries across this segment) capturing every key technical explanation, code walkthrough, and instruction given by ${channelTitle || 'the speaker'}.
+5. Summary: Concise, factual overview of what occurs between ${startFormatted} and ${endFormatted}.
+6. Key Takeaways: 2 to 3 factual takeaways highlighting core principles or mechanisms.
+7. Never infer hidden content, speaker intent, code, or identities. If audio or visual is unclear, write "Not clearly observable".
+8. Return an empty visualObservations array only when no meaningful visual event is clearly observable.
 
 Return strict JSON format:
 {
@@ -766,10 +766,10 @@ Return strict JSON format:
   "transcript": [
     {
       "startSec": ${nominalStartSec},
-      "endSec": ${Math.min(nominalEndSec, nominalStartSec + Math.max(20, Math.floor(chunkSpanSec / 2)))},
+      "endSec": ${nominalStartSec + Math.min(30, Math.floor(chunkSpanSec / 3))},
       "timestampStr": "${startFormatted}",
       "speaker": "${channelTitle || 'Speaker'}",
-      "text": "Factual dialogue, code explanation, or demonstration spoken or presented in this segment."
+      "text": "Detailed factual dialogue, code explanation, or demonstration spoken in this segment."
     }
   ],
   "visualObservations": [
@@ -867,7 +867,7 @@ router.post('/gemini/generate-full-notes', async (req, res) => {
     getAiClient(userApiKey); // Validate BYOK before caption retrieval.
     const durationFormatted = formatTime(durationSec);
     const hasCreatorChapters = Array.isArray(creatorChapters) && creatorChapters.length > 1;
-    const transcriptTarget = durationSec <= 600 ? '6 to 10' : durationSec <= 3600 ? '10 to 16' : '16 to 24';
+    const transcriptTarget = durationSec <= 600 ? '10 to 18' : durationSec <= 1800 ? '18 to 32' : durationSec <= 3600 ? '28 to 48' : '40 to 65';
 
     // 1. Attempt to fetch authentic official YouTube captions
     const videoId = extractYouTubeVideoId(videoUrl);
@@ -906,12 +906,19 @@ Title: "${videoTitle}"
 Channel / Presenter: "${channelTitle || 'Speaker'}"
 Duration: ${durationFormatted} (${durationSec} seconds)
 
-NON-HALLUCINATION RULES:
+NON-HALLUCINATION & FACTUAL ACCURACY RULES:
 - Every claim must be directly supported by the supplied video, official captions, or supplied description/chapters.
 - Do not fill gaps with likely content or general knowledge.
 - Do not invent quotations, code, equations, timestamps, chapter topics, people, products, or visual details.
 - If something is not clear, say "Not clearly observable" or omit it.
 - Visual notes must describe only what is visibly present; do not infer what a screen or diagram means.
+
+TECHNICAL & CODE-ACCURATE TRANSCRIPT DIRECTIVES:
+If this video covers technical topics (programming, frameworks, software architecture, mathematics, data science, engineering, command line tools, debugging):
+1. VERBATIM TECHNICAL TERMS & IDENTIFIERS: Transcribe exact code identifiers, function names, classes, interfaces, variables, package names, CLI commands with flags, endpoints, routes, status codes, and configuration keys (e.g. \`next()\`, \`express.Router()\`, \`docker build -t\`, \`SELECT * FROM\`, \`req.headers\`).
+2. STEP-BY-STEP TECHNICAL LOGIC: Record why each technical step or code alteration is made, what problem each function/module solves, and what parameters/arguments are passed.
+3. INLINE CODE NOTATION: Enclose all technical terms, keywords, commands, and code references in markdown backticks (\` \`).
+4. THOROUGH CHRONOLOGICAL HIGHLIGHTS: Provide ${transcriptTarget} rich, detailed timestamped transcript entries covering every key technical milestone, code change, terminal output, and explanation across the video.
 
 ${hasCreatorChapters ? `Creator Chapters Provided:\n${JSON.stringify(creatorChapters, null, 2)}\n` : ''}
 ${videoDescription ? `Video Context / Description:\n"""\n${videoDescription.slice(0, 1000)}\n"""\n` : ''}
@@ -925,8 +932,8 @@ ${
   hasOfficialTranscript
     ? `NOTE: Official YouTube captions were detected and will be used. Ensure chapters, key takeaways, and visual code blocks are deeply detailed.`
     : `MANDATORY TRANSCRIPT DENSITY REQUIREMENT:
-Provide ${transcriptTarget} concise timestamped entries distributed across the entire video. Capture only the most important dialogue, explanations, code walkthroughs, and instructions spoken by ${channelTitle || 'the speaker'}.
-Do not reproduce a word-for-word transcript or add repetitive entries.`
+Provide ${transcriptTarget} detailed timestamped entries distributed across the entire video. Capture only the most important dialogue, explanations, code walkthroughs, and instructions spoken by ${channelTitle || 'the speaker'}.
+Do not reproduce repetitive filler words, but preserve complete technical explanations and code discussions.`
 }
 
 Return STRICT JSON:

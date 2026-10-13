@@ -144,11 +144,11 @@ function markdownOneLine(value: unknown, fallback = ''): string {
 }
 
 function compactTranscript<T>(entries: T[], durationSec: number): T[] {
-  const maxEntries = durationSec <= 600 ? 12 : durationSec <= 3600 ? 24 : 40;
+  // Allow rich, detailed transcript highlights (especially for technical tutorials and lectures)
+  const maxEntries = durationSec <= 600 ? 30 : durationSec <= 1800 ? 60 : durationSec <= 3600 ? 100 : 180;
   if (entries.length <= maxEntries) return entries;
 
-  // Preserve coverage across the whole video instead of keeping only the
-  // beginning, which makes long Markdown files both shorter and more useful.
+  // Preserve uniform coverage across the whole video
   const selected: T[] = [];
   const step = (entries.length - 1) / (maxEntries - 1);
   for (let i = 0; i < maxEntries; i++) {
