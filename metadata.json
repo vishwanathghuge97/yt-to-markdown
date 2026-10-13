@@ -1,6 +1,6 @@
 {
-  "name": "OmniScribe Science - YouTube Video Transcriber & Summarizer",
-  "description": "Zero-skip multimodal YouTube video and lecture analyzer with visual frame OCR, scientific literature synthesis, and Google Drive export.",
+  "name": "yt-to-markdown – YouTube to Markdown & Video Note Summarizer",
+  "description": "Convert YouTube videos and lectures into structured Markdown notes, timestamped chapter summaries, key takeaways, and visual notes with AI. Export to Google Drive.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

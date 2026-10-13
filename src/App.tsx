@@ -9,7 +9,7 @@ import { Header } from './components/Header';
 import { DriveExportModal } from './components/DriveExportModal';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { MarkdownOutputView } from './components/MarkdownOutputView';
-import { FullAnalysisReport, ChunkAnalysisResult, VideoMetadata, ChunkBoundary } from './types/pipeline';
+import { FullAnalysisReport, ChunkAnalysisResult, VideoMetadata, ChunkBoundary, ChapterCluster } from './types/pipeline';
 import {
   planChunkBoundaries,
   deduplicateOverlapEntries,

@@ -18,7 +18,7 @@
 - 🎯 **Strict Factual Grounding**: Direct multimodal video understanding via Gemini (`mimeType: video/*`), eliminating hallucinations.
 - 🛡️ **Resource Protection**: Automatically screens and rejects non-YouTube links and private/unavailable videos before making model calls.
 - ⏱️ **Duration-Adaptive Chunking**: Smart zero-skip segmentation tailored from short clips to multi-hour lectures.
-- 📝 **Markdown Export**: Formatted tables of contents, summaries, key points, formula tables, and code blocks.
+- 📝 **Markdown Export**: Formatted tables of contents, summaries, key takeaways, and code blocks.
 - 📁 **Google Drive Export**: One-click direct export to your Google Drive folder.
 - ⚡ **Vercel & Production Ready**: Pre-configured with serverless endpoints (`/api/*`) and static Vite bundling.
 
