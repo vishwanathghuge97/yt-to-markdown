@@ -75,6 +75,7 @@ export interface ChapterCluster {
   overview: string;
   keyConcepts: string[];
   scientificHighlights: string[];
+  codeDemonstrated?: string;
 }
 
 export interface LiteratureItem {

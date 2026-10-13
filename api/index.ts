@@ -913,12 +913,24 @@ NON-HALLUCINATION & FACTUAL ACCURACY RULES:
 - If something is not clear, say "Not clearly observable" or omit it.
 - Visual notes must describe only what is visibly present; do not infer what a screen or diagram means.
 
-TECHNICAL & CODE-ACCURATE TRANSCRIPT DIRECTIVES:
+TECHNICAL VIDEO & CODE-ACCURATE DOCUMENTATION DIRECTIVES:
 If this video covers technical topics (programming, frameworks, software architecture, mathematics, data science, engineering, command line tools, debugging):
-1. VERBATIM TECHNICAL TERMS & IDENTIFIERS: Transcribe exact code identifiers, function names, classes, interfaces, variables, package names, CLI commands with flags, endpoints, routes, status codes, and configuration keys (e.g. \`next()\`, \`express.Router()\`, \`docker build -t\`, \`SELECT * FROM\`, \`req.headers\`).
-2. STEP-BY-STEP TECHNICAL LOGIC: Record why each technical step or code alteration is made, what problem each function/module solves, and what parameters/arguments are passed.
-3. INLINE CODE NOTATION: Enclose all technical terms, keywords, commands, and code references in markdown backticks (\` \`).
-4. THOROUGH CHRONOLOGICAL HIGHLIGHTS: Provide ${transcriptTarget} rich, detailed timestamped transcript entries covering every key technical milestone, code change, terminal output, and explanation across the video.
+1. HIGH CHAPTER GRANULARITY (NO GIANT CHAPTERS):
+   - Divide the video into focused, logical chapters (each 3 to 6 minutes long).
+   - NEVER create a chapter exceeding 7 minutes in length. For a ~30-minute tutorial, generate 6 to 9 distinct chapters.
+   - For each chapter, extract \`codeDemonstrated\`: the exact multi-line code block, route handler, schema definition, or terminal command written or tested in that section.
+2. VERBATIM TECHNICAL TERMS & IDENTIFIERS:
+   - Transcribe exact code identifiers, function names, classes, interfaces, variables, package names, CLI commands with flags, endpoints, routes, status codes, and configuration keys (e.g. \`next()\`, \`express.Router()\`, \`validationResult(req)\`, \`checkSchema\`, \`matchedData\`, \`req.body\`).
+3. STEP-BY-STEP TECHNICAL LOGIC:
+   - Record why each technical step or code alteration is made, what problem each function/module solves, and what parameters/arguments are passed.
+4. INLINE CODE NOTATION:
+   - Enclose all technical terms, keywords, commands, and code references in markdown backticks (\` \`).
+5. RICH ON-SCREEN CODE BLOCKS:
+   - Extract 6 to 12 meaningful on-screen code blocks or terminal commands across the video into \`visualObservations\`.
+   - Provide the complete working code or snippet in \`extractedTextOrCode\` (not just a single import statement).
+6. CONTINUOUS, DENSE TRANSCRIPT HIGHLIGHTS:
+   - Provide ${transcriptTarget} rich, detailed timestamped transcript entries covering every key technical milestone, code change, terminal output, and explanation across the video.
+   - Do NOT leave long unexplained gaps between entries during an active tutorial.
 
 ${hasCreatorChapters ? `Creator Chapters Provided:\n${JSON.stringify(creatorChapters, null, 2)}\n` : ''}
 ${videoDescription ? `Video Context / Description:\n"""\n${videoDescription.slice(0, 1000)}\n"""\n` : ''}
@@ -932,7 +944,7 @@ ${
   hasOfficialTranscript
     ? `NOTE: Official YouTube captions were detected and will be used. Ensure chapters, key takeaways, and visual code blocks are deeply detailed.`
     : `MANDATORY TRANSCRIPT DENSITY REQUIREMENT:
-Provide ${transcriptTarget} detailed timestamped entries distributed across the entire video. Capture only the most important dialogue, explanations, code walkthroughs, and instructions spoken by ${channelTitle || 'the speaker'}.
+Provide ${transcriptTarget} detailed timestamped entries distributed evenly across the entire video. Capture all important dialogue, explanations, code walkthroughs, parameter discussions, and instructions spoken by ${channelTitle || 'the speaker'}.
 Do not reproduce repetitive filler words, but preserve complete technical explanations and code discussions.`
 }
 
@@ -948,11 +960,12 @@ Return STRICT JSON:
   "chapters": [
     {
       "chapterIndex": 1,
-      "title": "Clear Topic Title",
+      "title": "Clear Topic Title (e.g. Validating Query Parameters with query() Middleware)",
       "startSec": 0,
-      "endSec": 300,
-      "timeRangeStr": "00:00 - 05:00",
+      "endSec": 240,
+      "timeRangeStr": "00:00 - 04:00",
       "overview": "Detailed walkthrough of what is taught and demonstrated in this section.",
+      "codeDemonstrated": "Full multi-line code block or terminal command demonstrated in this chapter (or empty string)",
       "keyConcepts": [
         "Concept or command explained",
         "Important rule or detail"
@@ -963,10 +976,10 @@ Return STRICT JSON:
     {
       "timestampSec": 120,
       "timestampStr": "02:00",
-      "type": "demo",
-      "headline": "Screen demonstration or code",
-      "extractedTextOrCode": "Exact code snippet or terminal command shown (or empty string)",
-      "description": "What is visible on screen"
+      "type": "terminal_code",
+      "headline": "Installing express-validator and npm setup",
+      "extractedTextOrCode": "npm i express-validator",
+      "description": "Terminal command executed to install validation library"
     }
   ],
   "transcript": [
@@ -975,7 +988,7 @@ Return STRICT JSON:
       "endSec": 45,
       "timestampStr": "00:00",
       "speaker": "${channelTitle || 'Speaker'}",
-      "text": "Detailed spoken points or dialogue."
+      "text": "Detailed spoken points, code explanation, or dialogue."
     }
   ]
 }

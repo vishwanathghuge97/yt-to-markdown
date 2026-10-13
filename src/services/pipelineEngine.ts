@@ -349,6 +349,10 @@ export function generateMarkdownReport(report: FullAnalysisReport): string {
       md += `### ${chap.title} (${chap.timeRangeStr})\n\n`;
     }
     md += `${chap.overview}\n\n`;
+    if (chap.codeDemonstrated && chap.codeDemonstrated.trim() && !/^(none|n\/a|null|empty)$/i.test(chap.codeDemonstrated.trim())) {
+      const fence = codeFenceFor(chap.codeDemonstrated);
+      md += `**Code & Syntax Demonstrated:**\n\n${fence}\n${chap.codeDemonstrated.trim()}\n${fence}\n\n`;
+    }
     if (chap.keyConcepts.length > 0) {
       md += `**Key Points:**\n`;
       for (const kc of chap.keyConcepts) {
