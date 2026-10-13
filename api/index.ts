@@ -126,7 +126,7 @@ app.use((_req, res, next) => {
   next();
 });
 
-// Dynamic Gemini Client getter
+// Dynamic Gemini Client getter with network timeout and user agent
 function getAiClient(userApiKey?: string): GoogleGenAI {
   const key = (userApiKey && userApiKey.trim()) || process.env.GEMINI_API_KEY;
   if (!key) {
@@ -134,7 +134,56 @@ function getAiClient(userApiKey?: string): GoogleGenAI {
       'A Gemini API key is required. Please click "API Key Set" or "Enter Free Key" in the top bar to provide your free Google Gemini API key.'
     );
   }
-  return new GoogleGenAI({ apiKey: key });
+  return new GoogleGenAI({
+    apiKey: key,
+    httpOptions: {
+      timeout: 35000,
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+}
+
+/**
+ * Safely extracts generated text from a GenerateContentResponse,
+ * including models with reasoning/thought parts where response.text may be nested.
+ */
+function extractResponseText(response: any): string {
+  if (response?.text && typeof response.text === 'string' && response.text.trim()) {
+    return response.text;
+  }
+  const parts = response?.candidates?.[0]?.content?.parts;
+  if (Array.isArray(parts)) {
+    const textParts = parts.filter((p: any) => p && p.text && !p.thought).map((p: any) => p.text);
+    if (textParts.length > 0) return textParts.join('');
+    const anyText = parts.filter((p: any) => p && p.text).map((p: any) => p.text);
+    if (anyText.length > 0) return anyText.join('');
+  }
+  return '';
+}
+
+/**
+ * Executes a Promise with a strict timeout rejection to prevent hanging serverless functions.
+ */
+async function callWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorMessage: string
+): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(errorMessage);
+      err.name = 'TimeoutError';
+      reject(err);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timer!);
+  }
 }
 
 /**
@@ -175,19 +224,36 @@ function cleanAndParseJson<T = any>(rawText: string): T {
   }
 
   // 3. Clean common LLM formatting anomalies (trailing commas, control chars)
-  try {
-    const candidate = isObjectFirst && lastBrace > firstBrace
-      ? text.slice(firstBrace, lastBrace + 1)
-      : firstBracket !== -1 && lastBracket > firstBracket
-        ? text.slice(firstBracket, lastBracket + 1)
-        : text;
+  const candidate = isObjectFirst && lastBrace > firstBrace
+    ? text.slice(firstBrace, lastBrace + 1)
+    : firstBracket !== -1 && lastBracket > firstBracket
+      ? text.slice(firstBracket, lastBracket + 1)
+      : text;
 
-    // Remove trailing commas before closing braces/brackets
+  try {
     const sanitized = candidate
       .replace(/,\s*([}\]])/g, '$1')
       .replace(/[\u0000-\u001F\u007F-\u009F]/g, (char) => (char === '\n' || char === '\r' || char === '\t' ? char : ''));
 
     return JSON.parse(sanitized);
+  } catch {}
+
+  // 4. Auto-close truncated JSON if stream ended abruptly
+  try {
+    let repaired = candidate
+      .replace(/,\s*([}\]])/g, '$1')
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, (char) => (char === '\n' || char === '\r' || char === '\t' ? char : ''));
+    const openBraces = (repaired.match(/\{/g) || []).length;
+    const closeBraces = (repaired.match(/\}/g) || []).length;
+    const openBrackets = (repaired.match(/\[/g) || []).length;
+    const closeBrackets = (repaired.match(/\]/g) || []).length;
+    if (openBrackets > closeBrackets) {
+      repaired += ']'.repeat(openBrackets - closeBrackets);
+    }
+    if (openBraces > closeBraces) {
+      repaired += '}'.repeat(openBraces - closeBraces);
+    }
+    return JSON.parse(repaired);
   } catch (err: any) {
     throw new Error(`Failed to parse model output as JSON: ${err.message}`);
   }
@@ -233,8 +299,7 @@ function formatTime(s: number) {
 }
 
 /**
- * Grounded model caller. When a video is supplied, every candidate must
- * inspect the video. A text-only fallback would invite fabricated analysis.
+ * Grounded model caller with per-call timeout, transient error retry, and multi-model cascade.
  */
 async function generateWithCascade(
   contentsOrPrompt: string | any[],
@@ -242,15 +307,92 @@ async function generateWithCascade(
   videoUri?: string,
   userApiKey?: string,
   onTextChunk?: (text: string) => void,
-  videoWindow?: { startSec: number; endSec: number }
+  videoWindow?: { startSec: number; endSec: number },
+  callTimeoutMs = 24000
 ): Promise<{ text: string; modelUsed: string }> {
   const aiClient = getAiClient(userApiKey);
-  const models = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+  const models = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
   const canonicalVideo = videoUri ? getCanonicalYouTubeUrl(videoUri) : undefined;
   let lastError: any = null;
 
   for (const model of models) {
     if (typeof contentsOrPrompt === 'string' && canonicalVideo) {
+      // Try model with 1 transient retry on 503 / 429
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const config: any = {
+            temperature: 0.1,
+          };
+          if (jsonMode) {
+            config.responseMimeType = 'application/json';
+          }
+
+          const videoPart: any = {
+            fileData: {
+              fileUri: canonicalVideo,
+              mimeType: 'video/*',
+            },
+          };
+          // Attach native video window metadata
+          if (videoWindow) {
+            videoPart.videoMetadata = {
+              startOffset: `${Math.max(0, Math.floor(videoWindow.startSec))}s`,
+              endOffset: `${Math.max(Math.floor(videoWindow.startSec) + 1, Math.floor(videoWindow.endSec))}s`,
+            };
+          }
+
+          const payloadContents = [
+            {
+              role: 'user',
+              parts: [
+                videoPart,
+                { text: contentsOrPrompt },
+              ],
+            },
+          ];
+
+          if (onTextChunk) {
+            let text = '';
+            const stream = await callWithTimeout(
+              aiClient.models.generateContentStream({ model, contents: payloadContents, config }),
+              callTimeoutMs,
+              `Streaming from ${model} timed out after ${Math.round(callTimeoutMs / 1000)}s`
+            );
+            for await (const chunk of stream) {
+              const chunkText = chunk.text || '';
+              if (chunkText) {
+                text += chunkText;
+                onTextChunk(chunkText);
+              }
+            }
+            if (text.trim()) return { text, modelUsed: model };
+          } else {
+            const response = await callWithTimeout(
+              aiClient.models.generateContent({ model, contents: payloadContents, config }),
+              callTimeoutMs,
+              `Call to ${model} timed out after ${Math.round(callTimeoutMs / 1000)}s`
+            );
+            const extracted = extractResponseText(response);
+            if (extracted.trim()) return { text: extracted, modelUsed: model };
+          }
+        } catch (err: any) {
+          const msg = String(err?.message || '');
+          const isTransient = /503|high demand|unavailable|429|rate limit|quota|timeout|timed out/i.test(msg);
+          console.warn(`Model ${model} attempt ${attempt + 1} with video attachment failed: ${msg}.`);
+          lastError = err;
+          if (isTransient && attempt === 0) {
+            await new Promise((r) => setTimeout(r, 1200));
+            continue;
+          }
+          break; // Move to next candidate model
+        }
+      }
+    }
+
+    // Never send a video-analysis prompt as text after video inspection fails.
+    if (canonicalVideo) continue;
+
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const config: any = {
           temperature: 0.1,
@@ -259,92 +401,53 @@ async function generateWithCascade(
           config.responseMimeType = 'application/json';
         }
 
-        const videoPart: any = {
-          fileData: {
-            fileUri: canonicalVideo,
-            mimeType: 'video/*',
-          },
-        };
-        // A time range in a prompt does not clip the video. Attach Gemini's
-        // native video metadata so this request receives only this window.
-        if (videoWindow) {
-          videoPart.videoMetadata = {
-            startOffset: `${Math.max(0, Math.floor(videoWindow.startSec))}s`,
-            endOffset: `${Math.max(Math.floor(videoWindow.startSec) + 1, Math.floor(videoWindow.endSec))}s`,
-          };
-        }
-
-        const payloadContents = [
-          {
-            role: 'user',
-            parts: [
-              videoPart,
-              { text: contentsOrPrompt },
-            ],
-          },
-        ];
-
         if (onTextChunk) {
           let text = '';
-          const stream = await aiClient.models.generateContentStream({ model, contents: payloadContents, config });
+          const stream = await callWithTimeout(
+            aiClient.models.generateContentStream({
+              model,
+              contents: typeof contentsOrPrompt === 'string' ? contentsOrPrompt : contentsOrPrompt,
+              config,
+            }),
+            callTimeoutMs,
+            `Text streaming from ${model} timed out`
+          );
           for await (const chunk of stream) {
-            if (chunk.text) {
-              text += chunk.text;
-              onTextChunk(chunk.text);
+            const chunkText = chunk.text || '';
+            if (chunkText) {
+              text += chunkText;
+              onTextChunk(chunkText);
             }
           }
-          if (text) return { text, modelUsed: model };
+          if (text.trim()) return { text, modelUsed: model };
         } else {
-          const response = await aiClient.models.generateContent({ model, contents: payloadContents, config });
-          if (response && response.text) return { text: response.text, modelUsed: model };
+          const response = await callWithTimeout(
+            aiClient.models.generateContent({
+              model,
+              contents: typeof contentsOrPrompt === 'string' ? contentsOrPrompt : contentsOrPrompt,
+              config,
+            }),
+            callTimeoutMs,
+            `Text generation from ${model} timed out`
+          );
+          const extracted = extractResponseText(response);
+          if (extracted.trim()) return { text: extracted, modelUsed: model };
         }
       } catch (err: any) {
-        console.warn(`Model ${model} with video attachment failed: ${err.message}. Trying the next grounded model...`);
+        const msg = String(err?.message || '');
+        const isTransient = /503|high demand|unavailable|429|rate limit|quota|timeout|timed out/i.test(msg);
+        console.warn(`Model ${model} text attempt ${attempt + 1} failed: ${msg}.`);
         lastError = err;
-        continue;
-      }
-    }
-
-    // Never send a video-analysis prompt as text after video inspection fails.
-    if (canonicalVideo) continue;
-
-    try {
-      const config: any = {
-        temperature: 0.1,
-      };
-      if (jsonMode) {
-        config.responseMimeType = 'application/json';
-      }
-
-      if (onTextChunk) {
-        let text = '';
-        const stream = await aiClient.models.generateContentStream({
-          model,
-          contents: typeof contentsOrPrompt === 'string' ? contentsOrPrompt : contentsOrPrompt,
-          config,
-        });
-        for await (const chunk of stream) {
-          if (chunk.text) {
-            text += chunk.text;
-            onTextChunk(chunk.text);
-          }
+        if (isTransient && attempt === 0) {
+          await new Promise((r) => setTimeout(r, 1200));
+          continue;
         }
-        if (text) return { text, modelUsed: model };
-      } else {
-        const response = await aiClient.models.generateContent({
-          model,
-          contents: typeof contentsOrPrompt === 'string' ? contentsOrPrompt : contentsOrPrompt,
-          config,
-        });
-        if (response && response.text) return { text: response.text, modelUsed: model };
+        break;
       }
-    } catch (err: any) {
-      console.warn(`Model ${model} text generation failed: ${err.message}. Trying next candidate...`);
-      lastError = err;
     }
   }
 
-  throw lastError || new Error('All model candidates failed to respond.');
+  throw lastError || new Error('All model candidates failed to respond within timeout limits.');
 }
 
 // Router for API endpoints
@@ -519,6 +622,21 @@ router.get('/youtube/info', async (req, res) => {
       }
     }
 
+    // Fast probe to check if verified YouTube captions are available
+    let hasCaptions = false;
+    try {
+      const cachedCaptions = getCached(transcriptCache, videoId);
+      if (cachedCaptions && cachedCaptions.length > 0) {
+        hasCaptions = true;
+      } else {
+        const probe = await YoutubeTranscript.fetchTranscript(videoId).catch(() => null);
+        if (probe && Array.isArray(probe) && probe.length > 0) {
+          setCached(transcriptCache, videoId, probe);
+          hasCaptions = true;
+        }
+      }
+    } catch {}
+
     const info = {
       title,
       author,
@@ -527,6 +645,7 @@ router.get('/youtube/info', async (req, res) => {
       description: description.slice(0, 3000),
       creatorChapters: creatorChapters.sort((a, b) => a.startSec - b.startSec),
       url: getCanonicalYouTubeUrl(url),
+      hasCaptions,
     };
     setCached(infoCache, videoId, info);
     return res.json(info);

@@ -77,11 +77,17 @@ export function planChunkBoundaries(
   overlapSec = 15,
   resolution: MediaResolution = 'high'
 ): ChunkBoundary[] {
-  const secondsPerWindow = totalDurationSec <= 2 * 3600
-    ? 15 * 60
-    : totalDurationSec <= 4 * 3600
-      ? 20 * 60
-      : 25 * 60;
+  // Adaptive window sizing: Smaller windows (5-8 mins) are analyzed in seconds by Gemini,
+  // preventing timeouts and heavy payloads on long videos.
+  const secondsPerWindow = requestedChunkDurationSec && requestedChunkDurationSec > 0
+    ? requestedChunkDurationSec
+    : totalDurationSec <= 1800 // <= 30 mins: 5 min windows
+      ? 5 * 60
+      : totalDurationSec <= 3600 // <= 1 hour: 7 min windows
+        ? 7 * 60
+        : totalDurationSec <= 7200 // <= 2 hours: 10 min windows
+          ? 10 * 60
+          : 15 * 60; // > 2 hours: 15 min windows
   const targetCount = Math.max(1, Math.ceil(totalDurationSec / secondsPerWindow));
 
   const chunks: ChunkBoundary[] = [];
