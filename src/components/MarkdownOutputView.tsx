@@ -17,18 +17,47 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(markdownContent);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(markdownContent);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = markdownContent;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = markdownContent;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (err) {
+        console.error('Clipboard copy failed:', err);
+      }
+    }
   };
 
   const cleanFileName = () => {
-    return `${videoTitle
+    const slug = (videoTitle || 'notes')
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
       .replace(/^-+|-+$/g, '')
-      .slice(0, 50) || 'transcript-summary'}.md`;
+      .slice(0, 60);
+    return `${slug || 'video-notes'}.md`;
   };
 
   const handleDownload = () => {
@@ -159,12 +188,13 @@ function formatInlineMarkdown(text: string): React.ReactNode {
     if (part.startsWith('[') && part.includes('](') && part.endsWith(')')) {
       const linkMatch = part.match(/\[(.*?)\]\((.*?)\)/);
       if (linkMatch) {
+        const isAnchor = linkMatch[2].startsWith('#');
         return (
           <a
             key={idx}
             href={linkMatch[2]}
-            target="_blank"
-            rel="noopener noreferrer"
+            target={isAnchor ? undefined : '_blank'}
+            rel={isAnchor ? undefined : 'noopener noreferrer'}
             className="text-blue-600 dark:text-blue-400 underline hover:opacity-80"
           >
             {linkMatch[1]}
@@ -336,6 +366,17 @@ function renderMarkdown(content: string) {
         </p>
       );
     }
+  }
+
+  if (inCodeBlock && codeBlockLines.length > 0) {
+    elements.push(
+      <div
+        key="code-eof"
+        className="bg-zinc-900 dark:bg-zinc-900/90 text-zinc-100 p-3.5 rounded font-mono text-xs overflow-x-auto border border-zinc-800 my-3"
+      >
+        <pre className="whitespace-pre-wrap">{codeBlockLines.join('\n')}</pre>
+      </div>
+    );
   }
 
   return elements;

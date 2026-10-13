@@ -139,49 +139,80 @@ function getAiClient(userApiKey?: string): GoogleGenAI {
 
 /**
  * Helper to safely extract and parse JSON from LLM outputs,
- * stripping markdown code fences or conversational wrappers.
+ * stripping markdown code fences or conversational wrappers and handling edge cases.
  */
 function cleanAndParseJson<T = any>(rawText: string): T {
   if (!rawText) throw new Error('Empty response from model');
   let text = rawText.trim();
-  if (text.startsWith('```json')) {
-    text = text.slice(7);
-  } else if (text.startsWith('```')) {
-    text = text.slice(3);
-  }
-  if (text.endsWith('```')) {
-    text = text.slice(0, -3);
-  }
-  text = text.trim();
 
+  // Extract from markdown code fences if wrapped in conversational text
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    text = codeBlockMatch[1].trim();
+  }
+
+  // 1. Direct parse attempt
   try {
     return JSON.parse(text);
-  } catch (err) {
-    const firstBrace = text.indexOf('{');
-    const lastBrace = text.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace > firstBrace) {
-      try {
-        return JSON.parse(text.slice(firstBrace, lastBrace + 1));
-      } catch {
-        // continue
-      }
-    }
-    const firstBracket = text.indexOf('[');
-    const lastBracket = text.lastIndexOf(']');
-    if (firstBracket !== -1 && lastBracket > firstBracket) {
+  } catch {}
+
+  // 2. Extract outermost JSON object or array
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  const firstBracket = text.indexOf('[');
+  const lastBracket = text.lastIndexOf(']');
+
+  const isObjectFirst = firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket);
+
+  if (isObjectFirst && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+    } catch {}
+  } else if (firstBracket !== -1 && lastBracket > firstBracket) {
+    try {
       return JSON.parse(text.slice(firstBracket, lastBracket + 1));
-    }
-    throw err;
+    } catch {}
+  }
+
+  // 3. Clean common LLM formatting anomalies (trailing commas, control chars)
+  try {
+    const candidate = isObjectFirst && lastBrace > firstBrace
+      ? text.slice(firstBrace, lastBrace + 1)
+      : firstBracket !== -1 && lastBracket > firstBracket
+        ? text.slice(firstBracket, lastBracket + 1)
+        : text;
+
+    // Remove trailing commas before closing braces/brackets
+    const sanitized = candidate
+      .replace(/,\s*([}\]])/g, '$1')
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, (char) => (char === '\n' || char === '\r' || char === '\t' ? char : ''));
+
+    return JSON.parse(sanitized);
+  } catch (err: any) {
+    throw new Error(`Failed to parse model output as JSON: ${err.message}`);
   }
 }
 
-// Strict YouTube Video ID extractor
+// Strict & resilient YouTube Video ID extractor handling all desktop, mobile, embed, and share formats
 function extractYouTubeVideoId(input: string): string | null {
   if (!input) return null;
-  const trimmed = input.trim();
+  let trimmed = input.trim();
+
+  // Strip enclosing quotes, markdown angle brackets <...>, or extra whitespace
+  trimmed = trimmed.replace(/^[<"'\s]+|[>"'\s]+$/g, '');
+
+  // Decode URI component if pasted as encoded string
+  if (trimmed.includes('%3A') || trimmed.includes('%2F')) {
+    try {
+      trimmed = decodeURIComponent(trimmed);
+    } catch {}
+  }
+
+  // Direct 11-char ID
   if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
     return trimmed;
   }
+
   const match = trimmed.match(
     /(?:https?:\/\/)?(?:(?:www|m|music)\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/|e\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i
   );
@@ -190,7 +221,7 @@ function extractYouTubeVideoId(input: string): string | null {
 
 function getCanonicalYouTubeUrl(input: string): string {
   const id = extractYouTubeVideoId(input);
-  return id ? `https://www.youtube.com/watch?v=${id}` : input;
+  return id ? `https://www.youtube.com/watch?v=${id}` : input.trim();
 }
 
 // Helper to format seconds as HH:MM:SS

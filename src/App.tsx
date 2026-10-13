@@ -184,10 +184,15 @@ export default function App() {
     return response as Response;
   };
 
-  // Helper to strictly validate YouTube URL / video ID
+  // Helper to strictly validate and extract YouTube URL / video ID
   const extractYouTubeVideoId = (input: string): string | null => {
     if (!input) return null;
-    const trimmed = input.trim();
+    let trimmed = input.trim().replace(/^[<"'\s]+|[>"'\s]+$/g, '');
+    if (trimmed.includes('%3A') || trimmed.includes('%2F')) {
+      try {
+        trimmed = decodeURIComponent(trimmed);
+      } catch {}
+    }
     if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
       return trimmed;
     }
@@ -199,8 +204,8 @@ export default function App() {
 
   const handleStartAnalysis = async (e: React.FormEvent) => {
     e.preventDefault();
-    const url = currentUrl.trim();
-    if (!url || isAnalyzing) return;
+    const rawInput = currentUrl.trim();
+    if (!rawInput || isAnalyzing) return;
 
     // Every visitor must provide their own Gemini API key.
     if (!customApiKey || !customApiKey.trim()) {
@@ -209,12 +214,15 @@ export default function App() {
       return;
     }
 
-    // Strict YouTube link verification: Do NOT waste API resources on non-YouTube links
-    const videoId = extractYouTubeVideoId(url);
+    // Strict YouTube link verification
+    const videoId = extractYouTubeVideoId(rawInput);
     if (!videoId) {
-      setInputError('Not a YouTube link. Please paste a valid YouTube video URL (e.g. https://www.youtube.com/watch?v=... or https://youtu.be/...)');
+      setInputError('Not a recognized YouTube video. Please paste a valid YouTube video URL (e.g. https://www.youtube.com/watch?v=... or https://youtu.be/...)');
       return;
     }
+
+    // Canonicalize to standard full watch URL
+    const url = `https://www.youtube.com/watch?v=${videoId}`;
 
     setInputError('');
     setIsAnalyzing(true);
@@ -423,7 +431,7 @@ export default function App() {
         }
       } catch (fastErr: any) {
         if (fastErr?.stopFallback) throw fastErr;
-        throw new Error(`Full-video analysis did not finish: ${fastErr.message}. No fallback calls were made, so your API quota was not spent on duplicate analysis.`);
+        addLog(`Single-pass notice: ${fastErr.message}. Automatically proceeding with multi-segment window analysis...`);
       }
 
       // If fast pass succeeded, set report immediately!

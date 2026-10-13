@@ -107,7 +107,21 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                     <input
                       type={visibleKeys[index] ? 'text' : 'password'}
                       value={key}
-                      onChange={(e) => setKeyValues((current) => current.map((item, i) => i === index ? e.target.value : item))}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val.includes('\n') || val.includes(',')) {
+                          const splitKeys = val.split(/[\n,]+/).map((k) => k.trim()).filter(Boolean);
+                          if (splitKeys.length > 1) {
+                            setKeyValues((current) => {
+                              const next = [...current];
+                              next.splice(index, 1, ...splitKeys);
+                              return next;
+                            });
+                            return;
+                          }
+                        }
+                        setKeyValues((current) => current.map((item, i) => i === index ? val : item));
+                      }}
                       placeholder="AIzaSy..."
                       spellCheck={false}
                       className="w-full pl-3 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-lg text-base sm:text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400"
