@@ -32,16 +32,14 @@ SCOPES.forEach((scope) => provider.addScope(scope));
 let isSigningIn = false;
 const DRIVE_TOKEN_KEY = 'yt_markdown_drive_access_token';
 const DRIVE_TOKEN_TIME_KEY = 'yt_markdown_drive_access_token_time';
-const DRIVE_TOKEN_TTL_MS = 50 * 60 * 1000;
 
 function loadCachedAccessToken(): string | null {
   if (typeof window === 'undefined') return null;
-  const token = sessionStorage.getItem(DRIVE_TOKEN_KEY);
-  const issuedAt = Number(sessionStorage.getItem(DRIVE_TOKEN_TIME_KEY) || 0);
-  if (token && issuedAt && Date.now() - issuedAt < DRIVE_TOKEN_TTL_MS) return token;
-  sessionStorage.removeItem(DRIVE_TOKEN_KEY);
-  sessionStorage.removeItem(DRIVE_TOKEN_TIME_KEY);
-  return null;
+  try {
+    return localStorage.getItem(DRIVE_TOKEN_KEY) || sessionStorage.getItem(DRIVE_TOKEN_KEY);
+  } catch {
+    return null;
+  }
 }
 
 let cachedAccessToken: string | null = loadCachedAccessToken();
@@ -49,12 +47,20 @@ let cachedAccessToken: string | null = loadCachedAccessToken();
 function cacheAccessToken(token: string | null) {
   cachedAccessToken = token;
   if (typeof window === 'undefined') return;
-  if (token) {
-    sessionStorage.setItem(DRIVE_TOKEN_KEY, token);
-    sessionStorage.setItem(DRIVE_TOKEN_TIME_KEY, String(Date.now()));
-  } else {
-    sessionStorage.removeItem(DRIVE_TOKEN_KEY);
-    sessionStorage.removeItem(DRIVE_TOKEN_TIME_KEY);
+  try {
+    if (token) {
+      localStorage.setItem(DRIVE_TOKEN_KEY, token);
+      localStorage.setItem(DRIVE_TOKEN_TIME_KEY, String(Date.now()));
+      sessionStorage.setItem(DRIVE_TOKEN_KEY, token);
+      sessionStorage.setItem(DRIVE_TOKEN_TIME_KEY, String(Date.now()));
+    } else {
+      localStorage.removeItem(DRIVE_TOKEN_KEY);
+      localStorage.removeItem(DRIVE_TOKEN_TIME_KEY);
+      sessionStorage.removeItem(DRIVE_TOKEN_KEY);
+      sessionStorage.removeItem(DRIVE_TOKEN_TIME_KEY);
+    }
+  } catch (e) {
+    console.warn('Storage operation failed:', e);
   }
 }
 let currentUser: User | null = null;
@@ -66,15 +72,15 @@ export const initAuth = (
   return onAuthStateChanged(auth, async (user: User | null) => {
     currentUser = user;
     if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-      } else if (!isSigningIn) {
-        cacheAccessToken(null);
-        if (onAuthFailure) onAuthFailure();
+      const token = loadCachedAccessToken();
+      if (onAuthSuccess) {
+        onAuthSuccess(user, token || '');
       }
     } else {
       cacheAccessToken(null);
-      if (onAuthFailure) onAuthFailure();
+      if (onAuthFailure) {
+        onAuthFailure();
+      }
     }
   });
 };
@@ -100,6 +106,9 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
+  if (!cachedAccessToken) {
+    cachedAccessToken = loadCachedAccessToken();
+  }
   return cachedAccessToken;
 };
 

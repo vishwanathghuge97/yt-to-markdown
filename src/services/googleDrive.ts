@@ -1,4 +1,4 @@
-import { getAccessToken } from './firebase';
+import { getAccessToken, googleSignIn } from './firebase';
 
 export interface DriveUploadResult {
   id: string;
@@ -10,20 +10,41 @@ export interface DriveUploadResult {
 
 const FOLDER_NAME = 'YouTube Summaries & Notes';
 
+async function getValidToken(): Promise<string> {
+  let token = await getAccessToken();
+  if (!token) {
+    const res = await googleSignIn();
+    token = res?.accessToken || null;
+  }
+  if (!token) {
+    throw new Error('Not authenticated with Google Drive. Please click Connect Drive.');
+  }
+  return token;
+}
+
 /**
  * Ensures or creates a dedicated folder in Google Drive for app exports
  */
 export async function getOrCreateExportFolder(): Promise<string> {
-  const token = await getAccessToken();
-  if (!token) throw new Error('Not authenticated with Google');
+  let token = await getValidToken();
 
   // Search for existing folder
   const query = `name = '${FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
 
-  const searchRes = await fetch(searchUrl, {
+  let searchRes = await fetch(searchUrl, {
     headers: { Authorization: `Bearer ${token}` },
   });
+
+  if (searchRes.status === 401) {
+    const reauth = await googleSignIn();
+    if (reauth?.accessToken) {
+      token = reauth.accessToken;
+      searchRes = await fetch(searchUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }
+  }
 
   if (!searchRes.ok) {
     const errorText = await searchRes.text();
@@ -66,8 +87,7 @@ export async function saveMarkdownToDrive(
   content: string,
   description?: string
 ): Promise<DriveUploadResult> {
-  const token = await getAccessToken();
-  if (!token) throw new Error('User is not authenticated with Google Drive');
+  let token = await getValidToken();
 
   // Ensure destination folder
   const folderId = await getOrCreateExportFolder();
@@ -92,7 +112,7 @@ export async function saveMarkdownToDrive(
     content +
     closeDelimiter;
 
-  const uploadRes = await fetch(
+  let uploadRes = await fetch(
     'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,createdTime',
     {
       method: 'POST',
@@ -103,6 +123,24 @@ export async function saveMarkdownToDrive(
       body: multipartRequestBody,
     }
   );
+
+  if (uploadRes.status === 401) {
+    const reauth = await googleSignIn();
+    if (reauth?.accessToken) {
+      token = reauth.accessToken;
+      uploadRes = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,createdTime',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': `multipart/related; boundary=${boundary}`,
+          },
+          body: multipartRequestBody,
+        }
+      );
+    }
+  }
 
   if (!uploadRes.ok) {
     const errorText = await uploadRes.text();
