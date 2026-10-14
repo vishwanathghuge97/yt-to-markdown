@@ -32,7 +32,6 @@ import {
   Layers,
   Key,
   X,
-  ClipboardPaste,
   Square,
 } from 'lucide-react';
 
@@ -174,24 +173,6 @@ export default function App() {
     setProgressPercent(0);
     setActiveChunkIndex(-1);
     addLog('Analysis stopped by user.');
-  };
-
-  const handlePasteUrl = async (e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    try {
-      if (navigator.clipboard?.readText) {
-        const text = await navigator.clipboard.readText();
-        if (text && text.trim()) {
-          setCurrentUrl(text.trim());
-          if (inputError) setInputError('');
-        }
-      }
-    } catch {
-      // Browser permission prompt or unsupported
-    }
   };
 
   const requestWithKeyRotation = async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -786,23 +767,9 @@ export default function App() {
                       if (inputError) setInputError('');
                     }}
                     placeholder="Paste YouTube link (e.g. youtube.com/watch?v=...)"
-                    className="w-full pl-3.5 pr-20 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-md text-base sm:text-sm font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400 min-h-[44px]"
+                    className="w-full pl-3.5 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-md text-base sm:text-sm font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400 min-h-[44px]"
                     disabled={isAnalyzing}
                   />
-                  
-                  {!currentUrl && !isAnalyzing && (
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
-                      <button
-                        type="button"
-                        onClick={handlePasteUrl}
-                        aria-label="Paste URL"
-                        className="px-2 py-1 rounded text-xs font-mono bg-zinc-200/80 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 transition flex items-center gap-1 touch-manipulation cursor-pointer select-none active:scale-95"
-                      >
-                        <ClipboardPaste className="w-3.5 h-3.5" />
-                        <span>Paste</span>
-                      </button>
-                    </div>
-                  )}
 
                   {currentUrl && (
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
