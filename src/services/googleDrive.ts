@@ -162,27 +162,38 @@ export async function saveMarkdownToDrive(
  * Fetches recent files exported to the yt-to-markdown notes folder
  */
 export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
-  const token = await getAccessToken();
-  if (!token) return [];
-
-  try {
-    const folderId = await getOrCreateExportFolder();
-    const query = `'${folderId}' in parents and trashed = false`;
-    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
-      query
-    )}&orderBy=createdTime desc&pageSize=50&fields=files(id,name,webViewLink,createdTime,size)`;
-
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.files || [];
-  } catch (err) {
-    console.error('Failed to list Drive files:', err);
-    return [];
+  let token = await getAccessToken();
+  if (!token) {
+    throw new Error('Not connected to Google Drive. Please click Connect Drive.');
   }
+
+  const folderId = await getOrCreateExportFolder();
+  const query = `'${folderId}' in parents and trashed = false`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+    query
+  )}&orderBy=createdTime desc&pageSize=50&fields=files(id,name,webViewLink,createdTime,size)`;
+
+  let res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (res.status === 401) {
+    const reauth = await googleSignIn();
+    if (reauth?.accessToken) {
+      token = reauth.accessToken;
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }
+  }
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Google Drive sync failed (${res.status}): ${errorText}`);
+  }
+
+  const data = await res.json();
+  return data.files || [];
 }
 
 /**
