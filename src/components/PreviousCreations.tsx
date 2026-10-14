@@ -276,27 +276,29 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
           </div>
           <div className="space-y-1">
             <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Connect Google Drive to View Saved Notes
+              {user ? 'Authorize Google Drive Sync' : 'Connect Google Drive to View Saved Notes'}
             </h3>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed">
-              Your previous creations are stored in your Google Drive folder. Connect your Google account to browse, copy, and view them.
+              {user
+                ? `Signed in as ${user.email}. Google requires 1-click authorization to access your "YouTube Summaries & Notes" folder.`
+                : 'Your previous creations are stored in your Google Drive folder. Connect your Google account to browse, copy, and view them.'}
             </p>
           </div>
           <button
             type="button"
             onClick={handleConnectDrive}
             disabled={isLoading}
-            className="inline-flex items-center gap-2 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-medium font-mono transition shadow-2xs active:scale-95"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-medium font-mono transition shadow-2xs active:scale-95 cursor-pointer"
           >
             {isLoading ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Connecting...</span>
+                <span>Authorizing...</span>
               </>
             ) : (
               <>
                 <HardDrive className="w-3.5 h-3.5" />
-                <span>Connect Google Drive</span>
+                <span>{user ? 'Authorize Drive Access' : 'Connect Google Drive'}</span>
               </>
             )}
           </button>

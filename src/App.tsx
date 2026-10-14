@@ -726,13 +726,6 @@ export default function App() {
         : `About ${plannedChunks.length || 1} video windows; time depends on Gemini availability`
     : 'Usually under 2 minutes';
 
-  const handleOpenHistory = () => {
-    const el = document.getElementById('previous-creations');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col font-sans transition-colors duration-150">
       {/* 1. Header */}
@@ -740,7 +733,6 @@ export default function App() {
         user={user}
         onAuthChange={setUser}
         onOpenDriveModal={() => setIsDriveModalOpen(true)}
-        onOpenHistory={handleOpenHistory}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         apiKey={customApiKeys.length ? String(customApiKeys.length) : ''}
