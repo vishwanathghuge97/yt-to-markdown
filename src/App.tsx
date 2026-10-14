@@ -32,6 +32,8 @@ import {
   Layers,
   Key,
   X,
+  ClipboardPaste,
+  Square,
 } from 'lucide-react';
 
 type AnalysisPhase = 'reading' | 'analyzing' | 'preparing';
@@ -74,6 +76,7 @@ export default function App() {
   });
   const [activeApiKeyIndex, setActiveApiKeyIndex] = useState(0);
   const activeApiKeyIndexRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const [isPersistedLocally, setIsPersistedLocally] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -161,6 +164,36 @@ export default function App() {
     setActivityLogs((prev) => [...prev.slice(-40), `[${time}] ${msg}`]);
   };
 
+  const handleCancelAnalysis = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsAnalyzing(false);
+    setStatusMessage('');
+    setProgressPercent(0);
+    setActiveChunkIndex(-1);
+    addLog('Analysis stopped by user.');
+  };
+
+  const handlePasteUrl = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    try {
+      if (navigator.clipboard?.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim()) {
+          setCurrentUrl(text.trim());
+          if (inputError) setInputError('');
+        }
+      }
+    } catch {
+      // Browser permission prompt or unsupported
+    }
+  };
+
   const requestWithKeyRotation = async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const attempts = Math.max(1, customApiKeys.length);
     let response: Response | null = null;
@@ -169,7 +202,19 @@ export default function App() {
       const key = customApiKeys[activeApiKeyIndexRef.current] || '';
       const headers = new Headers(init.headers);
       if (key) headers.set('x-gemini-api-key', key);
-      response = await fetch(input, { ...init, headers });
+      const userSignal = abortControllerRef.current?.signal;
+      let signal: AbortSignal | undefined = (init.signal as AbortSignal) || userSignal;
+      if (init.signal && userSignal) {
+        if (typeof AbortSignal.any === 'function') {
+          signal = AbortSignal.any([init.signal as AbortSignal, userSignal]);
+        } else {
+          const combined = new AbortController();
+          (init.signal as AbortSignal).addEventListener('abort', () => combined.abort(), { once: true });
+          userSignal.addEventListener('abort', () => combined.abort(), { once: true });
+          signal = combined.signal;
+        }
+      }
+      response = await fetch(input, { ...init, headers, signal });
 
       const shouldRotate = [401, 403, 429].includes(response.status) && attempt < attempts - 1;
       if (!shouldRotate) return response;
@@ -197,7 +242,7 @@ export default function App() {
       return trimmed;
     }
     const match = trimmed.match(
-      /(?:https?:\/\/)?(?:(?:www|m|music)\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/|e\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i
+      /(?:https?:\/\/)?(?:(?:www|m|music)\.)?(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/|e\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i
     );
     return match ? match[1] : null;
   };
@@ -226,6 +271,7 @@ export default function App() {
 
     setInputError('');
     setIsAnalyzing(true);
+    abortControllerRef.current = new AbortController();
     setProgressPercent(5);
     setAnalysisPhase('reading');
     setKeyRotationNotice('');
@@ -247,11 +293,14 @@ export default function App() {
       try {
         const infoController = new AbortController();
         const infoTimeout = setTimeout(() => infoController.abort(), 12000);
+        const onUserAbort = () => infoController.abort();
+        abortControllerRef.current?.signal.addEventListener('abort', onUserAbort, { once: true });
         let infoRes: Response;
         try {
           infoRes = await fetch(`/api/youtube/info?url=${encodeURIComponent(url)}`, { signal: infoController.signal });
         } finally {
           clearTimeout(infoTimeout);
+          abortControllerRef.current?.signal.removeEventListener('abort', onUserAbort);
         }
         if (infoRes.ok) {
           const info = await infoRes.json();
@@ -634,6 +683,11 @@ export default function App() {
       setStatusMessage('Markdown generation complete!');
       addLog(`Markdown document created successfully (${fullReport.markdownContent.split('\n').length} lines).`);
     } catch (err: any) {
+      if (err.name === 'AbortError' || abortControllerRef.current?.signal.aborted) {
+        addLog('Analysis cancelled.');
+        setStatusMessage('');
+        return;
+      }
       console.error('Analysis error:', err);
       setInputError(err.message || 'Generation failed. Please verify the YouTube URL.');
       setStatusMessage('');
@@ -641,6 +695,7 @@ export default function App() {
     } finally {
       setIsAnalyzing(false);
       setActiveChunkIndex(-1);
+      abortControllerRef.current = null;
     }
   };
 
@@ -721,51 +776,80 @@ export default function App() {
             )}
 
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-2.5">
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  value={currentUrl}
-                  onChange={(e) => {
-                    setCurrentUrl(e.target.value);
-                    if (inputError) setInputError('');
-                  }}
-                  placeholder="Paste YouTube link (e.g. youtube.com/watch?v=...)"
-                  className="w-full pl-3.5 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-md text-base sm:text-sm font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400 min-h-[44px]"
-                  disabled={isAnalyzing}
-                />
-                <p className="mt-1.5 text-[11px] font-mono text-zinc-500 dark:text-zinc-400">Long videos are analyzed in timed video windows.</p>
-                
-                {currentUrl && (
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
-                    <button
-                      type="button"
-                      onClick={() => setCurrentUrl('')}
-                      className="p-1.5 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition touch-manipulation"
-                      title="Clear URL"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
+              <div className="flex-1 space-y-1.5">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={currentUrl}
+                    onChange={(e) => {
+                      setCurrentUrl(e.target.value);
+                      if (inputError) setInputError('');
+                    }}
+                    placeholder="Paste YouTube link (e.g. youtube.com/watch?v=...)"
+                    className="w-full pl-3.5 pr-20 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-md text-base sm:text-sm font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400 min-h-[44px]"
+                    disabled={isAnalyzing}
+                  />
+                  
+                  {!currentUrl && !isAnalyzing && (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
+                      <button
+                        type="button"
+                        onClick={handlePasteUrl}
+                        aria-label="Paste URL"
+                        className="px-2 py-1 rounded text-xs font-mono bg-zinc-200/80 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 transition flex items-center gap-1 touch-manipulation cursor-pointer select-none active:scale-95"
+                      >
+                        <ClipboardPaste className="w-3.5 h-3.5" />
+                        <span>Paste</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {currentUrl && (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => setCurrentUrl('')}
+                        aria-label="Clear URL"
+                        className="p-1.5 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition touch-manipulation cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <p className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400">Long videos are analyzed in timed video windows.</p>
               </div>
 
-              <button
-                type="submit"
-                disabled={isAnalyzing || !currentUrl.trim()}
-                className="w-full sm:w-auto px-5 py-2.5 min-h-[44px] bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-950 rounded-md text-sm font-medium transition flex items-center justify-center gap-2 disabled:opacity-40 shrink-0 font-mono shadow-xs touch-manipulation active:scale-[0.98]"
-              >
-                {isAnalyzing ? (
-                  <>
+              {isAnalyzing ? (
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    disabled
+                    className="flex-1 sm:flex-initial px-4 py-2.5 min-h-[44px] bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 rounded-md text-sm font-medium transition flex items-center justify-center gap-2 font-mono shadow-xs opacity-90"
+                  >
                     <RefreshCw className="w-4 h-4 animate-spin" />
                     <span>Processing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>Generate .md</span>
-                  </>
-                )}
-              </button>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelAnalysis}
+                    className="px-3.5 py-2.5 min-h-[44px] border border-rose-300 dark:border-rose-900 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 rounded-md text-xs font-mono font-medium transition flex items-center justify-center gap-1.5 touch-manipulation active:scale-[0.98]"
+                    title="Stop analysis"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                    <span>Cancel</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!currentUrl.trim()}
+                  className="w-full sm:w-auto px-5 py-2.5 min-h-[44px] bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-950 rounded-md text-sm font-medium transition flex items-center justify-center gap-2 disabled:opacity-40 shrink-0 font-mono shadow-xs touch-manipulation active:scale-[0.98]"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Generate .md</span>
+                </button>
+              )}
             </div>
           </form>
         </div>

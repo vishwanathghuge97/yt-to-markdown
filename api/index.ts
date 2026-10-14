@@ -119,7 +119,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use((_req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-gemini-api-key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, x-gemini-api-key');
   if (_req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -280,7 +280,7 @@ function extractYouTubeVideoId(input: string): string | null {
   }
 
   const match = trimmed.match(
-    /(?:https?:\/\/)?(?:(?:www|m|music)\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/|e\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i
+    /(?:https?:\/\/)?(?:(?:www|m|music)\.)?(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/|e\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i
   );
   return match ? match[1] : null;
 }

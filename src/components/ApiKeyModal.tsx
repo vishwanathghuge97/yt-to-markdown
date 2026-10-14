@@ -23,7 +23,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [persistLocally, setPersistLocally] = useState(initialPersist);
 
-  // Sync state when opened
+  // Sync state when opened and add Escape key listener
   React.useEffect(() => {
     if (isOpen) {
       setKeyValues(apiKey.split('\n').map((key) => key.trim()).filter(Boolean).length > 0
@@ -32,8 +32,14 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
       setVisibleKeys({});
       setSavedSuccess(false);
       setPersistLocally(initialPersist);
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') onClose();
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
     }
-  }, [isOpen, apiKey, initialPersist]);
+  }, [isOpen, apiKey, initialPersist, onClose]);
 
   if (!isOpen) return null;
 

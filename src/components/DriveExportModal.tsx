@@ -42,10 +42,17 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen && user) {
-      loadRecentFiles();
+    if (isOpen) {
+      if (user) {
+        loadRecentFiles();
+      }
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') onClose();
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
     }
-  }, [isOpen, user]);
+  }, [isOpen, user, onClose]);
 
   const loadRecentFiles = async () => {
     try {

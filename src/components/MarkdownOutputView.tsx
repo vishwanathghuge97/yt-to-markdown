@@ -223,29 +223,92 @@ function formatInlineMarkdown(text: string): React.ReactNode {
   });
 }
 
+interface CodeBlockItemProps {
+  code: string;
+  language?: string;
+}
+
+const CodeBlockItem: React.FC<CodeBlockItemProps> = ({ code, language }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyCode = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = code;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy code snippet:', err);
+    }
+  };
+
+  return (
+    <div className="my-3.5 rounded-lg bg-zinc-900 dark:bg-zinc-950 text-zinc-100 border border-zinc-800 overflow-hidden font-mono text-xs">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-800/80 border-b border-zinc-800 text-[11px] text-zinc-400">
+        <span className="font-semibold text-zinc-300 uppercase tracking-wider text-[10px]">
+          {language || 'code'}
+        </span>
+        <button
+          type="button"
+          onClick={handleCopyCode}
+          className="flex items-center gap-1 px-2 py-0.5 rounded text-zinc-300 hover:text-white hover:bg-zinc-700/60 transition touch-manipulation active:scale-95"
+          title="Copy code snippet"
+        >
+          {copied ? (
+            <>
+              <Check className="w-3 h-3 text-emerald-400" />
+              <span className="text-emerald-400">Copied</span>
+            </>
+          ) : (
+            <>
+              <Copy className="w-3 h-3 text-zinc-400" />
+              <span>Copy</span>
+            </>
+          )}
+        </button>
+      </div>
+      <pre className="p-3.5 overflow-x-auto whitespace-pre-wrap leading-relaxed text-zinc-200">
+        {code}
+      </pre>
+    </div>
+  );
+};
+
 function renderMarkdown(content: string) {
   const lines = content.split('\n');
   const elements: React.ReactNode[] = [];
   let inCodeBlock = false;
   let codeBlockLines: string[] = [];
+  let currentLanguage = '';
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    if (line.startsWith('```')) {
+    if (/^```+/.test(line.trim())) {
       if (inCodeBlock) {
         elements.push(
-          <div
+          <CodeBlockItem
             key={`code-${i}`}
-            className="bg-zinc-900 dark:bg-zinc-900/90 text-zinc-100 p-3.5 rounded font-mono text-xs overflow-x-auto border border-zinc-800 my-3"
-          >
-            <pre className="whitespace-pre-wrap">{codeBlockLines.join('\n')}</pre>
-          </div>
+            code={codeBlockLines.join('\n')}
+            language={currentLanguage}
+          />
         );
         codeBlockLines = [];
+        currentLanguage = '';
         inCodeBlock = false;
       } else {
         inCodeBlock = true;
+        currentLanguage = line.trim().replace(/^```+/, '').trim();
       }
       continue;
     }
@@ -370,12 +433,11 @@ function renderMarkdown(content: string) {
 
   if (inCodeBlock && codeBlockLines.length > 0) {
     elements.push(
-      <div
+      <CodeBlockItem
         key="code-eof"
-        className="bg-zinc-900 dark:bg-zinc-900/90 text-zinc-100 p-3.5 rounded font-mono text-xs overflow-x-auto border border-zinc-800 my-3"
-      >
-        <pre className="whitespace-pre-wrap">{codeBlockLines.join('\n')}</pre>
-      </div>
+        code={codeBlockLines.join('\n')}
+        language={currentLanguage}
+      />
     );
   }
 
