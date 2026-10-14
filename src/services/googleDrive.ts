@@ -6,6 +6,7 @@ export interface DriveUploadResult {
   webViewLink?: string;
   folderId?: string;
   createdTime?: string;
+  size?: string;
 }
 
 const FOLDER_NAME = 'YouTube Summaries & Notes';
@@ -169,7 +170,7 @@ export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
     const query = `'${folderId}' in parents and trashed = false`;
     const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
       query
-    )}&orderBy=createdTime desc&pageSize=10&fields=files(id,name,webViewLink,createdTime)`;
+    )}&orderBy=createdTime desc&pageSize=50&fields=files(id,name,webViewLink,createdTime,size)`;
 
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
@@ -182,4 +183,62 @@ export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
     console.error('Failed to list Drive files:', err);
     return [];
   }
+}
+
+/**
+ * Reads the raw markdown content of a file from Google Drive
+ */
+export async function fetchDriveFileContent(fileId: string): Promise<string> {
+  let token = await getValidToken();
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
+
+  let res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (res.status === 401) {
+    const reauth = await googleSignIn();
+    if (reauth?.accessToken) {
+      token = reauth.accessToken;
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }
+  }
+
+  if (!res.ok) {
+    throw new Error(`Failed to read file from Google Drive (${res.status})`);
+  }
+
+  return await res.text();
+}
+
+/**
+ * Deletes a file from the user's Google Drive folder
+ */
+export async function deleteDriveFile(fileId: string): Promise<boolean> {
+  let token = await getValidToken();
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`;
+
+  let res = await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (res.status === 401) {
+    const reauth = await googleSignIn();
+    if (reauth?.accessToken) {
+      token = reauth.accessToken;
+      res = await fetch(url, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }
+  }
+
+  if (!res.ok && res.status !== 204 && res.status !== 404) {
+    throw new Error(`Failed to delete file from Google Drive (${res.status})`);
+  }
+
+  return true;
 }

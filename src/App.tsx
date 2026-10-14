@@ -8,6 +8,7 @@ import { User } from 'firebase/auth';
 import { Header } from './components/Header';
 import { DriveExportModal } from './components/DriveExportModal';
 import { ApiKeyModal } from './components/ApiKeyModal';
+import { HistoryDrawer } from './components/HistoryDrawer';
 import { MarkdownOutputView } from './components/MarkdownOutputView';
 import { FullAnalysisReport, ChunkAnalysisResult, VideoMetadata, ChunkBoundary, ChapterCluster } from './types/pipeline';
 import {
@@ -65,6 +66,7 @@ export default function App() {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [customApiKeys, setCustomApiKeys] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('gemini_custom_api_keys') || sessionStorage.getItem('gemini_custom_api_keys');
@@ -680,6 +682,39 @@ export default function App() {
     }
   };
 
+  const handleSelectCreation = (title: string, markdownContent: string) => {
+    const loadedReport: FullAnalysisReport = {
+      metadata: {
+        id: `history-${Date.now()}`,
+        url: '',
+        title: title || 'Saved Creation',
+        channel: 'Google Drive',
+        durationSec: 0,
+        publishedDate: new Date().toISOString().split('T')[0],
+      },
+      config: {
+        chunkDurationSec: 2400,
+        overlapSec: 20,
+        mediaResolution: 'high',
+        totalChunks: 1,
+        totalTokens: 0,
+        directYouTubeMode: false,
+      },
+      executiveSummary: 'Loaded from saved Google Drive creation.',
+      keyTakeaways: [],
+      chapters: [],
+      transcript: [],
+      visualObservations: [],
+      scientificEntities: [],
+      literatureMatches: [],
+      markdownContent,
+      generatedAt: new Date().toISOString(),
+    };
+    setReport(loadedReport);
+    setIsAnalyzing(false);
+    setStatusMessage('');
+  };
+
   const isSinglePassAnalysis = isAnalyzing && (
     statusMessage.startsWith('Generating structured notes') ||
     statusMessage.startsWith('Compiling final Markdown')
@@ -699,6 +734,7 @@ export default function App() {
         user={user}
         onAuthChange={setUser}
         onOpenDriveModal={() => setIsDriveModalOpen(true)}
+        onOpenHistory={() => setIsHistoryOpen(true)}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         apiKey={customApiKeys.length ? String(customApiKeys.length) : ''}
@@ -991,6 +1027,15 @@ export default function App() {
           videoTitle={report.metadata.title}
         />
       )}
+
+      {/* Previous Creations History Drawer */}
+      <HistoryDrawer
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        user={user}
+        onAuthChange={setUser}
+        onSelectCreation={handleSelectCreation}
+      />
     </div>
   );
 }

@@ -1,12 +1,13 @@
 import React from 'react';
 import { User } from 'firebase/auth';
-import { LogOut, HardDrive, Sun, Moon, Key } from 'lucide-react';
+import { LogOut, HardDrive, Sun, Moon, Key, Clock } from 'lucide-react';
 import { googleSignIn, logout } from '../services/firebase';
 
 interface HeaderProps {
   user: User | null;
   onAuthChange: (user: User | null) => void;
   onOpenDriveModal?: () => void;
+  onOpenHistory?: () => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
   apiKey: string;
@@ -17,6 +18,7 @@ export const Header: React.FC<HeaderProps> = ({
   user,
   onAuthChange,
   onOpenDriveModal,
+  onOpenHistory,
   darkMode,
   onToggleDarkMode,
   apiKey,
@@ -84,6 +86,19 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             />
           </button>
+
+          {/* Previous Creations History */}
+          {onOpenHistory && (
+            <button
+              type="button"
+              onClick={onOpenHistory}
+              className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 min-h-[38px] rounded-md text-xs font-mono transition border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 touch-manipulation active:scale-95"
+              aria-label="Previous creations history"
+            >
+              <Clock className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline">History</span>
+            </button>
+          )}
 
           {/* Dark Mode */}
           <button
