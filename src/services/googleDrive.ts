@@ -164,7 +164,9 @@ export async function saveMarkdownToDrive(
 export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
   let token = await getAccessToken();
   if (!token) {
-    throw new Error('Not connected to Google Drive. Please click Connect Drive.');
+    const err: any = new Error('Google Drive authorization required.');
+    err.code = 'AUTH_REQUIRED';
+    throw err;
   }
 
   const folderId = await getOrCreateExportFolder();
@@ -178,18 +180,14 @@ export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
   });
 
   if (res.status === 401) {
-    const reauth = await googleSignIn();
-    if (reauth?.accessToken) {
-      token = reauth.accessToken;
-      res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    }
+    const err: any = new Error('Google Drive session expired.');
+    err.code = 'AUTH_REQUIRED';
+    throw err;
   }
 
   if (!res.ok) {
     const errorText = await res.text();
-    throw new Error(`Google Drive sync failed (${res.status}): ${errorText}`);
+    throw new Error(`Google Drive sync notice (${res.status}): ${errorText}`);
   }
 
   const data = await res.json();

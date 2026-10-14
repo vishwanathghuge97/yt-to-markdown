@@ -8,7 +8,7 @@ import { User } from 'firebase/auth';
 import { Header } from './components/Header';
 import { DriveExportModal } from './components/DriveExportModal';
 import { ApiKeyModal } from './components/ApiKeyModal';
-import { HistoryDrawer } from './components/HistoryDrawer';
+import { PreviousCreations } from './components/PreviousCreations';
 import { MarkdownOutputView } from './components/MarkdownOutputView';
 import { FullAnalysisReport, ChunkAnalysisResult, VideoMetadata, ChunkBoundary, ChapterCluster } from './types/pipeline';
 import {
@@ -66,7 +66,6 @@ export default function App() {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [customApiKeys, setCustomApiKeys] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('gemini_custom_api_keys') || sessionStorage.getItem('gemini_custom_api_keys');
@@ -727,6 +726,13 @@ export default function App() {
         : `About ${plannedChunks.length || 1} video windows; time depends on Gemini availability`
     : 'Usually under 2 minutes';
 
+  const handleOpenHistory = () => {
+    const el = document.getElementById('previous-creations');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col font-sans transition-colors duration-150">
       {/* 1. Header */}
@@ -734,7 +740,7 @@ export default function App() {
         user={user}
         onAuthChange={setUser}
         onOpenDriveModal={() => setIsDriveModalOpen(true)}
-        onOpenHistory={() => setIsHistoryOpen(true)}
+        onOpenHistory={handleOpenHistory}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         apiKey={customApiKeys.length ? String(customApiKeys.length) : ''}
@@ -1013,6 +1019,13 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* 4. Previous Creations (Integrated at bottom of main layout) */}
+        <PreviousCreations
+          user={user}
+          onAuthChange={setUser}
+          onSelectCreation={handleSelectCreation}
+        />
       </main>
 
       {/* Google Drive Export Modal */}
@@ -1027,15 +1040,6 @@ export default function App() {
           videoTitle={report.metadata.title}
         />
       )}
-
-      {/* Previous Creations History Drawer */}
-      <HistoryDrawer
-        isOpen={isHistoryOpen}
-        onClose={() => setIsHistoryOpen(false)}
-        user={user}
-        onAuthChange={setUser}
-        onSelectCreation={handleSelectCreation}
-      />
     </div>
   );
 }
