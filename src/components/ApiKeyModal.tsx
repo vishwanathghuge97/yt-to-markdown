@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Key, Eye, EyeOff, Check, ExternalLink, X, ShieldCheck, Plus, Trash2 } from 'lucide-react';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 
 interface ApiKeyModalProps {
   isOpen: boolean;
@@ -20,8 +21,12 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
   const [visibleKeys, setVisibleKeys] = useState<Record<number, boolean>>({});
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [persistLocally, setPersistLocally] = useState(initialPersist);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
-  // Sync state when opened and add Escape key listener
+  // Escape-to-close, background scroll lock, focus trap + restore.
+  useDialogA11y(isOpen, onClose, panelRef);
+
+  // Sync state when the dialog is opened.
   React.useEffect(() => {
     if (isOpen) {
       setKeyValues(apiKey.split('\n').map((key) => key.trim()).filter(Boolean).length > 0
@@ -30,14 +35,8 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
       setVisibleKeys({});
       setSavedSuccess(false);
       setPersistLocally(initialPersist);
-
-      const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') onClose();
-      };
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
     }
-  }, [isOpen, apiKey, initialPersist, onClose]);
+  }, [isOpen, apiKey, initialPersist]);
 
   if (!isOpen) return null;
 
@@ -62,9 +61,18 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
     onSaveKey('', false);
   };
 
+  // Backdrop clicks intentionally do NOT close this dialog: it holds unsaved
+  // API keys, and an accidental outside click would discard them.
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl max-w-md w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 dark:bg-black/70 backdrop-blur-xs anim-fade-in">
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Gemini API key settings"
+        className="anim-panel-in bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl max-w-md w-full max-h-[90dvh] overflow-y-auto overscroll-contain shadow-2xl"
+      >
         {/* Header */}
         <div className="px-5 py-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -90,7 +98,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         </div>
 
         {/* Body */}
-        <form onSubmit={handleSave} className="p-5 space-y-4" role="dialog" aria-modal="true" aria-label="Gemini API key settings">
+        <form onSubmit={handleSave} className="p-5 space-y-4">
           <div className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed space-y-2">
             <p>
               Add multiple keys, one per line. The app automatically tries the next key when one is rejected, rate-limited, or exhausted.
@@ -135,13 +143,15 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                       }}
                       placeholder="AIzaSy..."
                       spellCheck={false}
+                      autoComplete="off"
+                      data-autofocus={index === 0 ? true : undefined}
                       className="w-full pl-3 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-lg text-base sm:text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400"
                       aria-label={`Gemini API key ${index + 1}`}
                     />
                     <button
                       type="button"
                       onClick={() => setVisibleKeys((current) => ({ ...current, [index]: !current[index] }))}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 p-1"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 p-1.5"
                       aria-label={visibleKeys[index] ? 'Hide API key' : 'Show API key'}
                     >
                       {visibleKeys[index] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -240,13 +250,13 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-1.5 text-xs font-mono rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+              className="px-3.5 py-2 text-xs font-mono rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-1.5 text-xs font-mono font-medium rounded-lg bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-950 transition shadow-xs"
+              className="px-4 py-2 text-xs font-mono font-medium rounded-lg bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-950 transition shadow-xs"
             >
               Save Key
             </button>

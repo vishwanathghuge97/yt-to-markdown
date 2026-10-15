@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { User } from 'firebase/auth';
 import {
   saveMarkdownToDrive,
@@ -6,6 +6,7 @@ import {
   DriveUploadResult,
 } from '../services/googleDrive';
 import { googleSignIn, formatAuthError } from '../services/firebase';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 import {
   HardDrive,
   FolderCheck,
@@ -40,6 +41,10 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
   const [exportResult, setExportResult] = useState<DriveUploadResult | null>(null);
   const [recentFiles, setRecentFiles] = useState<DriveUploadResult[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Escape-to-close, background scroll lock, focus trap + restore.
+  useDialogA11y(isOpen, onClose, panelRef);
 
   useEffect(() => {
     if (isOpen) {
@@ -49,13 +54,8 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
       if (user) {
         loadRecentFiles();
       }
-      const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') onClose();
-      };
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
     }
-  }, [isOpen, user, onClose]);
+  }, [isOpen, user]);
 
   const loadRecentFiles = async () => {
     try {
@@ -102,24 +102,33 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 dark:bg-black/70 backdrop-blur-xs">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-zinc-900/60 dark:bg-black/70 backdrop-blur-xs anim-fade-in"
+      onClick={(event) => {
+        // Backdrop click closes this dialog — safe here: nothing is typed or
+        // buffered in it, and an export in flight is protected.
+        if (event.target === event.currentTarget && !isExporting) onClose();
+      }}
+    >
       <div
-        className="bg-white dark:bg-zinc-900 rounded-xl sm:rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto border border-slate-200 dark:border-zinc-800 shadow-2xl flex flex-col transition-colors"
+        ref={panelRef}
+        tabIndex={-1}
+        className="anim-panel-in bg-white dark:bg-zinc-900 rounded-xl sm:rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto overscroll-contain border border-zinc-200 dark:border-zinc-800 shadow-2xl flex flex-col transition-colors"
         role="dialog"
         aria-modal="true"
         aria-label="Save to Google Drive"
       >
         {/* Header */}
-        <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 dark:border-zinc-800 flex items-center justify-between">
+        <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
             <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/40 border border-blue-100 dark:border-blue-800 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
               <HardDrive className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-zinc-100">
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
                 Save to Google Drive
               </h3>
-              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-zinc-400">
+              <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400">
                 Export markdown report to your Drive folder
               </p>
             </div>
@@ -127,7 +136,7 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
 
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 p-1.5 rounded-lg transition touch-manipulation"
+            className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1.5 rounded-lg transition touch-manipulation"
             aria-label="Close dialog"
           >
             <X className="w-5 h-5" />
@@ -144,8 +153,8 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
           )}
 
           {/* Details */}
-          <div className="bg-slate-50 dark:bg-zinc-800/40 rounded-xl p-3.5 sm:p-4 border border-slate-200 dark:border-zinc-800 space-y-2 text-xs">
-            <div className="flex justify-between items-center text-slate-600 dark:text-zinc-400">
+          <div className="bg-zinc-50 dark:bg-zinc-800/40 rounded-xl p-3.5 sm:p-4 border border-zinc-200 dark:border-zinc-800 space-y-2 text-xs">
+            <div className="flex justify-between items-center text-zinc-600 dark:text-zinc-400">
               <span className="font-medium">Folder:</span>
               <span className="font-mono text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-1">
                 <FolderCheck className="w-3.5 h-3.5" />
@@ -153,9 +162,9 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
               </span>
             </div>
 
-            <div className="flex justify-between items-center text-slate-600 dark:text-zinc-400">
+            <div className="flex justify-between items-center text-zinc-600 dark:text-zinc-400">
               <span className="font-medium">File Name:</span>
-              <span className="font-mono text-slate-900 dark:text-zinc-200 font-medium truncate max-w-[200px] sm:max-w-[260px]">
+              <span className="font-mono text-zinc-900 dark:text-zinc-200 font-medium truncate max-w-[200px] sm:max-w-[260px]">
                 {fileName.endsWith('.md') ? fileName : `${fileName}.md`}
               </span>
             </div>
@@ -186,18 +195,18 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
           {/* Recent Exports */}
           {user && recentFiles.length > 0 && (
             <div className="pt-1">
-              <p className="text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-2">
+              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-2">
                 Recent Drive files in folder:
               </p>
               <div className="space-y-1.5 max-h-28 overflow-y-auto">
                 {recentFiles.map((file) => (
                   <div
                     key={file.id}
-                    className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-zinc-800 border border-slate-100 dark:border-zinc-700 text-xs"
+                    className="flex items-center justify-between p-2 rounded-lg bg-zinc-50 dark:bg-zinc-800 border border-zinc-100 dark:border-zinc-700 text-xs"
                   >
                     <div className="flex items-center gap-2 truncate mr-2">
                       <FileText className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-                      <span className="truncate text-slate-800 dark:text-zinc-200">{file.name}</span>
+                      <span className="truncate text-zinc-800 dark:text-zinc-200">{file.name}</span>
                     </div>
                     {file.webViewLink && (
                       <a
@@ -218,10 +227,10 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-4 sm:px-6 py-3 sm:py-4 bg-slate-50 dark:bg-zinc-800/60 border-t border-slate-100 dark:border-zinc-800 flex items-center justify-end gap-2.5">
+        <div className="px-4 sm:px-6 py-3 sm:py-4 bg-zinc-50 dark:bg-zinc-800/60 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-end gap-2.5">
           <button
             onClick={onClose}
-            className="px-3.5 py-2 min-h-[40px] border border-slate-300 dark:border-zinc-700 rounded-lg text-xs font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 transition touch-manipulation"
+            className="px-3.5 py-2 min-h-[44px] border border-zinc-300 dark:border-zinc-700 rounded-lg text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition touch-manipulation"
           >
             Cancel
           </button>
@@ -229,7 +238,7 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
           <button
             onClick={handleConfirmExport}
             disabled={isExporting}
-            className="px-4 py-2 min-h-[40px] bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-xs font-semibold transition flex items-center gap-2 shadow-xs disabled:opacity-50 touch-manipulation"
+            className="px-4 py-2 min-h-[44px] bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-xs font-semibold transition flex items-center gap-2 shadow-xs disabled:opacity-50 touch-manipulation"
           >
             {isExporting ? (
               <>

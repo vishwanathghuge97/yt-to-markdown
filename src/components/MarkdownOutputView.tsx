@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Download, Copy, Check, HardDrive } from 'lucide-react';
+import { Download, Copy, Check, HardDrive, FileText } from 'lucide-react';
 import { slugifyHeading } from '../shared/markdown';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { downloadTextFile } from '../utils/download';
+import { useCopiedFlag } from '../hooks/useCopiedFlag';
 
 interface MarkdownOutputViewProps {
   videoTitle: string;
@@ -15,14 +16,13 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
   markdownContent,
   onOpenDriveModal,
 }) => {
-  const [copied, setCopied] = useState(false);
+  const { copied, flashCopied } = useCopiedFlag();
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
 
   const handleCopy = async () => {
     const ok = await copyTextToClipboard(markdownContent);
     if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      flashCopied();
     } else {
       console.error('Clipboard copy failed.');
     }
@@ -53,11 +53,11 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
         {/* File Name & Stats */}
         <div className="flex items-center space-x-2 overflow-hidden min-w-0">
           <div className="font-mono font-medium text-zinc-900 dark:text-zinc-100 truncate flex items-center gap-1.5 text-xs">
-            <span className="text-zinc-400 shrink-0">📄</span>
+            <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0" aria-hidden="true" />
             <span className="truncate">{cleanFileName()}</span>
           </div>
           <span className="text-zinc-300 dark:text-zinc-700 shrink-0">|</span>
-          <span className="font-mono text-[10px] sm:text-[11px] text-zinc-500 shrink-0">
+          <span className="font-mono text-[11px] text-zinc-500 shrink-0">
             {lineCount}L · {wordCount.toLocaleString()}W · {sizeKb}KB
           </span>
         </div>
@@ -68,7 +68,7 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
           <div className="flex border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 p-0.5 text-xs">
             <button
               onClick={() => setViewMode('preview')}
-              className={`px-2.5 py-1 min-h-[32px] sm:min-h-0 rounded font-mono text-[11px] transition touch-manipulation ${
+              className={`px-2.5 py-1 min-h-[36px] sm:min-h-0 rounded font-mono text-[11px] transition touch-manipulation ${
                 viewMode === 'preview'
                   ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-semibold'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900'
@@ -78,7 +78,7 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
             </button>
             <button
               onClick={() => setViewMode('raw')}
-              className={`px-2.5 py-1 min-h-[32px] sm:min-h-0 rounded font-mono text-[11px] transition touch-manipulation ${
+              className={`px-2.5 py-1 min-h-[36px] sm:min-h-0 rounded font-mono text-[11px] transition touch-manipulation ${
                 viewMode === 'raw'
                   ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-semibold'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900'
@@ -92,7 +92,7 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
             {/* Copy */}
             <button
               onClick={handleCopy}
-              className="px-2.5 py-1.5 min-h-[34px] sm:min-h-0 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 rounded text-xs font-mono transition flex items-center gap-1 touch-manipulation active:scale-95"
+              className="px-2.5 py-1.5 min-h-[38px] sm:min-h-0 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 rounded text-xs font-mono transition flex items-center gap-1 touch-manipulation active:scale-95"
               aria-label="Copy markdown"
             >
               {copied ? (
@@ -111,7 +111,7 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
             {/* Download */}
             <button
               onClick={handleDownload}
-              className="px-2.5 py-1.5 min-h-[34px] sm:min-h-0 bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 rounded text-xs font-mono font-medium transition flex items-center gap-1 touch-manipulation active:scale-95"
+              className="px-2.5 py-1.5 min-h-[38px] sm:min-h-0 bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 rounded text-xs font-mono font-medium transition flex items-center gap-1 touch-manipulation active:scale-95"
               aria-label="Download markdown file"
             >
               <Download className="w-3.5 h-3.5" />
@@ -121,7 +121,7 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
             {/* Save to Drive */}
             <button
               onClick={onOpenDriveModal}
-              className="px-2.5 py-1.5 min-h-[34px] sm:min-h-0 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 rounded text-xs font-mono transition flex items-center gap-1 touch-manipulation active:scale-95"
+              className="px-2.5 py-1.5 min-h-[38px] sm:min-h-0 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 rounded text-xs font-mono transition flex items-center gap-1 touch-manipulation active:scale-95"
               title="Save copy to Google Drive"
               aria-label="Save to Google Drive"
             >
@@ -133,7 +133,7 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
       </div>
 
       {/* Content Area */}
-      <div className="p-3.5 sm:p-6 md:p-8 overflow-y-auto max-h-[75vh] sm:max-h-[800px] bg-white dark:bg-zinc-950">
+      <div className="p-3.5 sm:p-6 md:p-8 md:max-h-[800px] md:overflow-y-auto overscroll-contain break-words bg-white dark:bg-zinc-950">
         {viewMode === 'raw' ? (
           <div className="bg-zinc-900 text-zinc-100 p-3 sm:p-4 rounded font-mono text-xs overflow-x-auto leading-relaxed border border-zinc-800">
             <pre className="whitespace-pre-wrap break-words">{markdownContent}</pre>
@@ -198,13 +198,12 @@ interface CodeBlockItemProps {
 }
 
 const CodeBlockItem: React.FC<CodeBlockItemProps> = ({ code, language }) => {
-  const [copied, setCopied] = useState(false);
+  const { copied, flashCopied } = useCopiedFlag();
 
   const handleCopyCode = async () => {
     const ok = await copyTextToClipboard(code);
     if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      flashCopied();
     } else {
       console.error('Failed to copy code snippet.');
     }
@@ -367,7 +366,7 @@ function renderMarkdown(content: string) {
         <h1
           key={`h1-${i}`}
           id={headingId(text)}
-          className="text-xl font-bold text-zinc-900 dark:text-zinc-100 pb-2 border-b border-zinc-200 dark:border-zinc-800 mt-5 mb-3 scroll-mt-4"
+          className="text-xl font-bold text-zinc-900 dark:text-zinc-100 pb-2 border-b border-zinc-200 dark:border-zinc-800 mt-5 mb-3 scroll-mt-16"
         >
           {formatInlineMarkdown(text)}
         </h1>
@@ -378,7 +377,7 @@ function renderMarkdown(content: string) {
         <h2
           key={`h2-${i}`}
           id={headingId(text)}
-          className="text-base font-semibold text-zinc-900 dark:text-zinc-100 pb-1 border-b border-zinc-100 dark:border-zinc-800/60 mt-6 mb-2 scroll-mt-4"
+          className="text-base font-semibold text-zinc-900 dark:text-zinc-100 pb-1 border-b border-zinc-100 dark:border-zinc-800/60 mt-6 mb-2 scroll-mt-16"
         >
           {formatInlineMarkdown(text)}
         </h2>
@@ -389,7 +388,7 @@ function renderMarkdown(content: string) {
         <h3
           key={`h3-${i}`}
           id={headingId(text)}
-          className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mt-4 mb-1 scroll-mt-4"
+          className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mt-4 mb-1 scroll-mt-16"
         >
           {formatInlineMarkdown(text)}
         </h3>

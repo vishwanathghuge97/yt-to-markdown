@@ -322,7 +322,9 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       if (content) {
         setStatusNotice(null);
         onSelectCreation(item.title, content);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        // Smoothness comes from the global CSS scroll-behavior rule
+        // (which respects prefers-reduced-motion).
+        window.scrollTo({ top: 0 });
       } else {
         showNotice('No content available for this note.');
       }
@@ -528,7 +530,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
 
         <div className="flex items-center gap-2 flex-wrap">
           {statusNotice && (
-            <span className="text-xs font-mono text-zinc-500 dark:text-zinc-400 animate-in fade-in duration-150">
+            <span role="status" className="text-xs font-mono text-zinc-500 dark:text-zinc-400 anim-fade-in">
               {statusNotice}
             </span>
           )}
@@ -600,7 +602,8 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('all')}
-              className={`px-2.5 py-1 rounded transition ${
+              aria-pressed={activeTab === 'all'}
+              className={`px-2.5 py-1.5 rounded transition ${
                 activeTab === 'all'
                   ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium shadow-2xs'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
@@ -611,7 +614,8 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('drive')}
-              className={`px-2.5 py-1 rounded transition flex items-center gap-1 ${
+              aria-pressed={activeTab === 'drive'}
+              className={`px-2.5 py-1.5 rounded transition flex items-center gap-1 ${
                 activeTab === 'drive'
                   ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium shadow-2xs'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
@@ -623,7 +627,8 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('local')}
-              className={`px-2.5 py-1 rounded transition flex items-center gap-1 ${
+              aria-pressed={activeTab === 'local'}
+              className={`px-2.5 py-1.5 rounded transition flex items-center gap-1 ${
                 activeTab === 'local'
                   ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium shadow-2xs'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
@@ -642,7 +647,8 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search creations..."
-              className="w-full pl-8 pr-3 py-1 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400"
+              aria-label="Search creations"
+              className="w-full pl-8 pr-3 py-2 sm:py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-base sm:text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400"
             />
           </div>
         </div>
@@ -678,7 +684,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
         <div className="space-y-3">
           {/* Cards Grid */}
           <div
-            className={`grid grid-cols-1 md:grid-cols-2 gap-2.5 transition-opacity duration-200 ${
+            className={`grid grid-cols-1 sm:grid-cols-2 gap-2.5 transition-opacity duration-200 ${
               isSyncing ? 'opacity-70' : 'opacity-100'
             }`}
           >
@@ -756,7 +762,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                         <button
                           type="button"
                           onClick={() => setConfirmDeleteId(null)}
-                          className="px-2 py-0.5 rounded border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900"
+                          className="px-2.5 py-1 rounded border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900"
                         >
                           Cancel
                         </button>
@@ -764,7 +770,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                           type="button"
                           onClick={() => handleDelete(item)}
                           disabled={isBusy}
-                          className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-medium flex items-center gap-1 cursor-pointer"
+                          className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-700 text-white font-medium flex items-center gap-1 cursor-pointer"
                         >
                           {isBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Confirm'}
                         </button>
@@ -811,7 +817,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                           type="button"
                           onClick={() => handleCopy(item)}
                           disabled={isBusy}
-                          className="p-1.5 rounded text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition active:scale-95"
+                          className="p-2 rounded text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition active:scale-95"
                           aria-label="Copy markdown"
                           title="Copy markdown text"
                         >
@@ -826,7 +832,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                           type="button"
                           onClick={() => handleDownload(item)}
                           disabled={isBusy}
-                          className="p-1.5 rounded text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition active:scale-95"
+                          className="p-2 rounded text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition active:scale-95"
                           aria-label="Download markdown"
                           title="Download .md file"
                         >
@@ -837,7 +843,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                           type="button"
                           onClick={() => setConfirmDeleteId(item.id)}
                           disabled={isBusy}
-                          className="p-1.5 rounded text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition active:scale-95"
+                          className="p-2 rounded text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition active:scale-95"
                           aria-label="Delete note"
                           title="Delete note"
                         >
@@ -871,7 +877,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 text-[11px]">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
             <span>IndexedDB Durable Engine: Active</span>
           </div>
 

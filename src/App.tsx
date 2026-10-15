@@ -155,6 +155,10 @@ export default function App() {
       document.documentElement.classList.remove('dark');
       localStorage.setItem('theme', 'light');
     }
+    // Keep the mobile browser chrome color in sync with the in-app theme.
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', darkMode ? '#09090b' : '#fafafa');
   }, [darkMode]);
 
   // Auth listener
@@ -925,6 +929,8 @@ export default function App() {
 
       {/* 2. Main Content */}
       <main className="flex-1 max-w-4xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
+        <h1 className="sr-only">yt-to-markdown — convert YouTube videos into Markdown notes</h1>
+
         {/* URL Input Form */}
         <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3.5 sm:p-4 shadow-sm transition-colors">
           <form onSubmit={handleStartAnalysis} className="space-y-3">
@@ -969,6 +975,11 @@ export default function App() {
                 <div className="relative">
                   <input
                     type="text"
+                    inputMode="url"
+                    autoComplete="url"
+                    spellCheck={false}
+                    enterKeyHint="go"
+                    aria-label="YouTube video link"
                     value={currentUrl}
                     onChange={(e) => {
                       setCurrentUrl(e.target.value);
@@ -1035,7 +1046,7 @@ export default function App() {
             {/* Header / Active status line */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-zinc-100 dark:border-zinc-800/80">
               <div className="space-y-1 min-w-0 flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2" role="status">
                   <span className="relative flex h-2 w-2 shrink-0">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -1088,7 +1099,14 @@ export default function App() {
                   <span>{plannedChunks.filter((c) => c.status === 'completed').length} of {plannedChunks.length} segments</span>
                 )}
               </div>
-              <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
+              <div
+                role="progressbar"
+                aria-label="Analysis progress"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={isSinglePassAnalysis ? undefined : progressPercent}
+                className="w-full bg-zinc-100 dark:bg-zinc-800 h-2 rounded-full overflow-hidden"
+              >
                 <div
                   className={`bg-zinc-900 dark:bg-zinc-100 h-full transition-all duration-300 ${isSinglePassAnalysis ? 'w-1/3 animate-pulse' : ''}`}
                   style={isSinglePassAnalysis ? undefined : { width: `${progressPercent}%` }}
@@ -1103,7 +1121,7 @@ export default function App() {
                   <span>Coverage Timeline (Zero-Skip)</span>
                   <span>{formatTimestamp(currentVideoMeta?.durationSec || 0)}</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+                <div className="grid grid-cols-1 min-[380px]:grid-cols-2 md:grid-cols-4 gap-2">
                   {plannedChunks.map((chunk, idx) => {
                     const isCurrent = activeChunkIndex === idx;
                     const isDone = chunk.status === 'completed';
@@ -1140,6 +1158,8 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setShowLogs(!showLogs)}
+                aria-expanded={showLogs}
+                aria-controls="activity-log"
                 className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-950 flex items-center justify-between text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition touch-manipulation"
               >
                 <div className="flex items-center gap-1.5 text-xs">
@@ -1150,7 +1170,7 @@ export default function App() {
               </button>
 
               {showLogs && (
-                <div className="p-3 bg-zinc-900 dark:bg-zinc-950 text-zinc-300 text-xs font-mono max-h-40 overflow-y-auto space-y-1">
+                <div id="activity-log" className="p-3 bg-zinc-900 dark:bg-zinc-950 text-zinc-300 text-xs font-mono max-h-40 overflow-y-auto overscroll-contain space-y-1">
                   {activityLogs.map((log, i) => (
                     <div key={i} className="leading-relaxed">
                       {log}

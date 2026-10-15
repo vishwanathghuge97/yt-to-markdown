@@ -29,7 +29,8 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192x192.png" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <meta name="theme-color" content="#4f46e5" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#fafafa" />
     
     <!-- Open Graph / Facebook / LinkedIn / Discord -->
     <meta property="og:type" content="website" />
@@ -58,6 +59,8 @@
           } else {
             document.documentElement.classList.remove('dark');
           }
+          var themeColor = document.querySelector('meta[name="theme-color"]');
+          if (themeColor) themeColor.setAttribute('content', isDark ? '#09090b' : '#fafafa');
         } catch (_) {}
       })();
     </script>
@@ -65,10 +68,10 @@
     <!-- Fonts: Preconnected and asynchronously loaded to prevent blocking page layout -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" media="print" onload="this.media='all'">
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" media="print" onload="this.media='all'">
     <noscript>
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
     </noscript>
 
     <!-- Schema.org Structured Data (JSON-LD) for Search Engines -->

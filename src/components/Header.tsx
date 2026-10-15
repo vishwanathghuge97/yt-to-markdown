@@ -58,7 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 sticky top-0 z-40 transition-colors">
-      <div className="max-w-5xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2">
+      <div className="max-w-4xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-1.5 sm:gap-2">
         {/* Brand: Pure Utilitarian Tool Identity */}
         <div className="flex items-center space-x-2 shrink-0">
           <div className="w-7 h-7 rounded border border-zinc-900 dark:border-zinc-100 bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center font-mono text-[11px] font-bold text-white dark:text-zinc-950">
@@ -79,7 +79,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* API Key configuration button */}
           <button
             onClick={onOpenApiKeyModal}
-            className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 min-h-[38px] rounded-md text-xs font-mono transition border touch-manipulation active:scale-95 ${
+            className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 min-h-[40px] rounded-md text-xs font-mono transition border touch-manipulation active:scale-95 ${
               apiKeyCount > 0
                 ? 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
                 : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60'
@@ -103,7 +103,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Dark Mode */}
           <button
             onClick={onToggleDarkMode}
-            className="p-2 min-h-[38px] min-w-[38px] flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-transparent hover:border-zinc-200 dark:hover:border-zinc-800 transition touch-manipulation active:scale-95"
+            className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-transparent hover:border-zinc-200 dark:hover:border-zinc-800 transition touch-manipulation active:scale-95"
             title={darkMode ? 'Light mode' : 'Dark mode'}
             aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
           >
@@ -112,8 +112,8 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Google Drive Connect */}
           {user ? (
-            <div className="flex items-center space-x-1 sm:space-x-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md py-1 px-1.5 sm:px-2 text-xs min-h-[38px]">
-              <span className="font-mono text-zinc-700 dark:text-zinc-300 truncate max-w-[65px] sm:max-w-[110px] text-[11px] sm:text-xs">
+            <div className="flex items-center space-x-1 sm:space-x-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md py-1 px-1.5 sm:px-2 text-xs min-h-[40px]">
+              <span className="hidden min-[360px]:inline-block font-mono text-zinc-700 dark:text-zinc-300 truncate max-w-[64px] sm:max-w-[110px] text-[11px] sm:text-xs">
                 {user.email?.split('@')[0]}
               </span>
 
@@ -147,8 +147,9 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={handleSignIn}
               disabled={isSigningIn}
-              className="inline-flex items-center justify-center border border-zinc-300 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 px-2.5 py-1.5 min-h-[38px] rounded-md text-xs font-mono text-zinc-700 dark:text-zinc-300 transition active:scale-95 disabled:opacity-50 touch-manipulation"
+              className="inline-flex items-center justify-center border border-zinc-300 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 px-2.5 py-1.5 min-h-[40px] rounded-md text-xs font-mono text-zinc-700 dark:text-zinc-300 transition active:scale-95 disabled:opacity-50 touch-manipulation"
               title="Connect Google Drive to export notes directly"
+              aria-label="Connect Google Drive"
             >
               <HardDrive className="w-3.5 h-3.5 sm:mr-1.5 text-zinc-500 shrink-0" />
               <span className="hidden sm:inline">{isSigningIn ? 'Connecting...' : 'Connect Drive'}</span>
@@ -161,7 +162,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="bg-amber-50 dark:bg-amber-950/80 border-t border-amber-200 dark:border-amber-800 px-4 py-2 text-xs text-amber-800 dark:text-amber-200 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
             <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
-            <span className="truncate">{authError}</span>
+            <span className="min-w-0 break-words">{authError}</span>
           </div>
           <button
             onClick={() => setAuthError(null)}
