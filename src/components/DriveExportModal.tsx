@@ -5,7 +5,7 @@ import {
   listRecentDriveExports,
   DriveUploadResult,
 } from '../services/googleDrive';
-import { googleSignIn } from '../services/firebase';
+import { googleSignIn, formatAuthError } from '../services/firebase';
 import {
   HardDrive,
   FolderCheck,
@@ -65,12 +65,13 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
 
   const handleSignIn = async () => {
     try {
+      setErrorMessage(null);
       const res = await googleSignIn();
       if (res) {
         onAuthChange(res.user);
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to authenticate with Google');
+      setErrorMessage(formatAuthError(err));
     }
   };
 
@@ -92,7 +93,7 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
       await loadRecentFiles();
     } catch (err: any) {
       console.error('Drive export error:', err);
-      setErrorMessage(err.message || 'Failed to save file to Google Drive');
+      setErrorMessage(formatAuthError(err));
     } finally {
       setIsExporting(false);
     }

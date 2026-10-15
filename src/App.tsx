@@ -23,6 +23,7 @@ import {
   analyzeChunkClientDirect,
   sanitizeErrorMessage,
 } from './services/clientGemini';
+import { saveLocalCreation } from './services/creationStorage';
 import { initAuth } from './services/firebase';
 import {
   Play,
@@ -378,6 +379,16 @@ export default function App() {
               setStatusMessage('Compiling final Markdown document...');
               generatedReport = directRes.report;
               generatedReport.markdownContent = generateMarkdownReport(generatedReport);
+              try {
+                saveLocalCreation({
+                  title: generatedReport.metadata.title,
+                  channelTitle: generatedReport.metadata.channel,
+                  videoUrl: url,
+                  markdownContent: generatedReport.markdownContent,
+                });
+              } catch (saveErr) {
+                console.warn('Could not save note locally:', saveErr);
+              }
               addLog(`✓ Direct Gemini analysis completed successfully (${directRes.modelUsed})!`);
             }
           } catch (directErr: any) {
@@ -502,6 +513,16 @@ export default function App() {
               };
 
               generatedReport.markdownContent = generateMarkdownReport(generatedReport);
+              try {
+                saveLocalCreation({
+                  title: generatedReport.metadata.title,
+                  channelTitle: generatedReport.metadata.channel,
+                  videoUrl: url,
+                  markdownContent: generatedReport.markdownContent,
+                });
+              } catch (saveErr) {
+                console.warn('Could not save note locally:', saveErr);
+              }
               addLog(
                 fastData.hasOfficialTranscript
                   ? `✓ Extracted verified official YouTube transcript (${formattedTranscript.length} dialogue entries) with ${formattedChapters.length} chapters!`
@@ -745,6 +766,16 @@ export default function App() {
 
       fullReport.markdownContent = generateMarkdownReport(fullReport);
       setReport(fullReport);
+      try {
+        saveLocalCreation({
+          title: fullReport.metadata.title,
+          channelTitle: fullReport.metadata.channel,
+          videoUrl: url,
+          markdownContent: fullReport.markdownContent,
+        });
+      } catch (saveErr) {
+        console.warn('Could not save note locally:', saveErr);
+      }
 
       setProgressPercent(100);
       setStatusMessage('Markdown generation complete!');
@@ -1103,6 +1134,7 @@ export default function App() {
           user={user}
           onAuthChange={setUser}
           onSelectCreation={handleSelectCreation}
+          lastGeneratedTime={report?.generatedAt ? new Date(report.generatedAt).getTime() : 0}
         />
       </main>
 

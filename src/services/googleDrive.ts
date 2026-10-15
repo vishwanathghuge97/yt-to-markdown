@@ -1,4 +1,5 @@
 import { getAccessToken, googleSignIn } from './firebase';
+import { updateCreationDriveInfo } from './creationStorage';
 
 export interface DriveUploadResult {
   id: string;
@@ -149,17 +150,25 @@ export async function saveMarkdownToDrive(
   }
 
   const result = await uploadRes.json();
-  return {
+  const exportResult: DriveUploadResult = {
     id: result.id,
     name: result.name,
     webViewLink: result.webViewLink,
     folderId,
     createdTime: result.createdTime,
   };
+
+  try {
+    updateCreationDriveInfo(fileName, result.id, result.webViewLink);
+  } catch (e) {
+    console.warn('Could not update creation history:', e);
+  }
+
+  return exportResult;
 }
 
 /**
- * Fetches recent files exported to the yt-to-markdown notes folder
+ * Fetches recent files exported to the yt-to-markdown notes folder or Drive
  */
 export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
   let token = await getAccessToken();
@@ -169,11 +178,21 @@ export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
     throw err;
   }
 
-  const folderId = await getOrCreateExportFolder();
-  const query = `'${folderId}' in parents and trashed = false`;
+  let folderId: string | null = null;
+  try {
+    folderId = await getOrCreateExportFolder();
+  } catch (folderErr) {
+    console.warn('Folder resolution notice:', folderErr);
+  }
+
+  // Broad query ensures notes created across sessions, folders, or root are discovered
+  const query = folderId
+    ? `trashed = false and ('${folderId}' in parents or mimeType = 'text/markdown' or name contains '.md')`
+    : `trashed = false and (mimeType = 'text/markdown' or name contains '.md')`;
+
   const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
     query
-  )}&orderBy=createdTime desc&pageSize=50&fields=files(id,name,webViewLink,createdTime,size)`;
+  )}&orderBy=createdTime desc&pageSize=50&fields=files(id,name,webViewLink,createdTime,size,parents)`;
 
   let res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -193,6 +212,7 @@ export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
   const data = await res.json();
   return data.files || [];
 }
+
 
 /**
  * Reads the raw markdown content of a file from Google Drive

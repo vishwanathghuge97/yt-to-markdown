@@ -105,7 +105,23 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
   }
 };
 
+export function isTokenExpired(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const timeStr = localStorage.getItem(DRIVE_TOKEN_TIME_KEY) || sessionStorage.getItem(DRIVE_TOKEN_TIME_KEY);
+    if (!timeStr) return true;
+    const time = parseInt(timeStr, 10);
+    // Google OAuth access tokens expire after 1 hour (3600s). Treat as expired after 50 minutes.
+    return Date.now() - time > 50 * 60 * 1000;
+  } catch {
+    return true;
+  }
+}
+
 export const getAccessToken = async (): Promise<string | null> => {
+  if (isTokenExpired()) {
+    return null;
+  }
   if (!cachedAccessToken) {
     cachedAccessToken = loadCachedAccessToken();
   }
@@ -121,3 +137,23 @@ export const logout = async () => {
   cacheAccessToken(null);
   currentUser = null;
 };
+
+export function formatAuthError(error: any): string {
+  const code = error?.code || '';
+  const message = error?.message || '';
+
+  if (code === 'auth/unauthorized-domain' || message.includes('unauthorized-domain')) {
+    const hostname = typeof window !== 'undefined' ? window.location.hostname : 'your-app.vercel.app';
+    return `Domain authorization required on Vercel: Google blocked sign-in because "${hostname}" is not yet in your Firebase Authorized Domains. In Firebase Console → Authentication → Settings → Authorized domains, add "${hostname}".`;
+  }
+  if (code === 'auth/popup-blocked' || message.includes('popup-blocked')) {
+    return 'The Google sign-in window was blocked by your browser. Please allow popups for this site and retry.';
+  }
+  if (code === 'auth/popup-closed-by-user') {
+    return 'Sign-in window closed before completing.';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'Network connection error while connecting to Google. Please check your network and retry.';
+  }
+  return error?.message || 'Authentication error. Please retry.';
+}

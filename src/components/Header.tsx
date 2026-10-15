@@ -1,7 +1,7 @@
 import React from 'react';
 import { User } from 'firebase/auth';
-import { LogOut, HardDrive, Sun, Moon, Key } from 'lucide-react';
-import { googleSignIn, logout } from '../services/firebase';
+import { LogOut, HardDrive, Sun, Moon, Key, AlertCircle, X } from 'lucide-react';
+import { googleSignIn, logout, formatAuthError } from '../services/firebase';
 
 interface HeaderProps {
   user: User | null;
@@ -23,16 +23,20 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenApiKeyModal,
 }) => {
   const [isSigningIn, setIsSigningIn] = React.useState(false);
+  const [authError, setAuthError] = React.useState<string | null>(null);
 
   const handleSignIn = async () => {
     try {
       setIsSigningIn(true);
+      setAuthError(null);
       const result = await googleSignIn();
       if (result) {
         onAuthChange(result.user);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to sign in:', err);
+      const formatted = formatAuthError(err);
+      setAuthError(formatted);
     } finally {
       setIsSigningIn(false);
     }
@@ -135,6 +139,23 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
+
+      {authError && (
+        <div className="bg-amber-50 dark:bg-amber-950/80 border-t border-amber-200 dark:border-amber-800 px-4 py-2 text-xs text-amber-800 dark:text-amber-200 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span className="truncate">{authError}</span>
+          </div>
+          <button
+            onClick={() => setAuthError(null)}
+            className="p-1 text-amber-600 dark:text-amber-400 hover:text-amber-900 rounded shrink-0 cursor-pointer"
+            aria-label="Dismiss error"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </header>
   );
 };
+
