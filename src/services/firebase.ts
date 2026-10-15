@@ -29,7 +29,6 @@ export const SCOPES = [
 const provider = new GoogleAuthProvider();
 SCOPES.forEach((scope) => provider.addScope(scope));
 
-let isSigningIn = false;
 const DRIVE_TOKEN_KEY = 'yt_markdown_drive_access_token';
 const DRIVE_TOKEN_TIME_KEY = 'yt_markdown_drive_access_token_time';
 
@@ -87,7 +86,6 @@ export const initAuth = (
 
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
-    isSigningIn = true;
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
@@ -100,8 +98,6 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
   } catch (error: any) {
     console.error('Sign-in error:', error);
     throw error;
-  } finally {
-    isSigningIn = false;
   }
 };
 

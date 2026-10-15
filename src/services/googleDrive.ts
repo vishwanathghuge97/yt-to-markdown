@@ -159,7 +159,7 @@ export async function saveMarkdownToDrive(
   };
 
   try {
-    updateCreationDriveInfo(fileName, result.id, result.webViewLink);
+    updateCreationDriveInfo(result.name || fileName, result.id, result.webViewLink);
   } catch (e) {
     console.warn('Could not update creation history:', e);
   }

@@ -75,6 +75,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [needsAuth, setNeedsAuth] = useState(false);
+  const [needsReauth, setNeedsReauth] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'drive' | 'local'>('all');
   const [actionFileId, setActionFileId] = useState<string | null>(null);
@@ -127,6 +128,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
         const list = await listRecentDriveExports();
         setDriveFiles(list);
         setNeedsAuth(false);
+        setNeedsReauth(false);
 
         if (isManual) {
           setStatusNotice(
@@ -137,6 +139,10 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       } catch (err: any) {
         if (err?.code === 'AUTH_REQUIRED') {
           setNeedsAuth(true);
+          // The Firebase session is still active but the Google access token
+          // expired; surface an explicit reconnect action (needs a user click).
+          setNeedsReauth(true);
+          setStatusNotice('Google Drive access expired. Use "Reconnect Drive" to continue syncing.');
         } else {
           const formatted = formatAuthError(err);
           setAuthErrorMessage(formatted);
@@ -443,7 +449,6 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       setActionFileId(item.id);
       // Remove from local storage
       deleteLocalCreation(item.id);
-      deleteLocalCreation(item.title);
       reloadLocalCreations();
 
       // If it exists in Drive and Drive is connected, delete from Drive too
@@ -528,24 +533,37 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
           )}
 
           {user ? (
-            <button
-              type="button"
-              onClick={() => loadDriveFiles(true)}
-              disabled={isSyncing}
-              className={`px-2.5 py-1.5 rounded-md text-xs font-mono flex items-center gap-1.5 transition touch-manipulation border border-zinc-200 dark:border-zinc-800 ${
-                isSyncing
-                  ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed'
-                  : 'bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
-              }`}
-              aria-label="Sync creations from Google Drive"
-            >
-              <RefreshCw
-                className={`w-3.5 h-3.5 transition-transform ${
-                  isSyncing ? 'animate-spin text-blue-500' : ''
+            needsReauth ? (
+              <button
+                type="button"
+                onClick={handleConnectDrive}
+                disabled={isLoading}
+                className="px-2.5 py-1.5 rounded-md text-xs font-mono flex items-center gap-1.5 transition touch-manipulation bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                aria-label="Reconnect Google Drive"
+              >
+                <HardDrive className="w-3.5 h-3.5" />
+                <span>{isLoading ? 'Reconnecting...' : 'Reconnect Drive'}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => loadDriveFiles(true)}
+                disabled={isSyncing}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-mono flex items-center gap-1.5 transition touch-manipulation border border-zinc-200 dark:border-zinc-800 ${
+                  isSyncing
+                    ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed'
+                    : 'bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
                 }`}
-              />
-              <span>{isSyncing ? 'Syncing...' : 'Sync Drive'}</span>
-            </button>
+                aria-label="Sync creations from Google Drive"
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 transition-transform ${
+                    isSyncing ? 'animate-spin text-blue-500' : ''
+                  }`}
+                />
+                <span>{isSyncing ? 'Syncing...' : 'Sync Drive'}</span>
+              </button>
+            )
           ) : (
             <button
               type="button"

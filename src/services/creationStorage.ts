@@ -32,6 +32,25 @@ export interface StorageStats {
 const STORAGE_KEY = 'yt_markdown_creations_history';
 const MAX_LOCAL_CREATIONS_CACHE = 40;
 const ESTIMATED_LOCAL_STORAGE_LIMIT = 5 * 1024 * 1024; // ~5MB standard browser limit
+// Keep the localStorage cache lightweight: it is only a fast cache for the
+// list UI, while full notes live durably in IndexedDB (and Drive). Staying
+// well below the browser quota avoids oversized multi-MB writes per save.
+const LOCAL_CACHE_BUDGET_BYTES = 2 * 1024 * 1024;
+const STUB_MARKER = '\n\n*(Full content preserved in IndexedDB/Drive)*';
+const LOCAL_PREVIEW_CHARS = 1500;
+
+/**
+ * Converts a record into a lightweight cache entry (metadata + short preview).
+ * `contentStubbed` lets readers hydrate the full text from IndexedDB/Drive.
+ */
+function stubLocalContent(item: CreationRecord): CreationRecord {
+  if (item.contentStubbed) return item;
+  return {
+    ...item,
+    markdownContent: (item.markdownContent || '').slice(0, LOCAL_PREVIEW_CHARS) + STUB_MARKER,
+    contentStubbed: true,
+  };
+}
 
 /**
  * Gets synchronous creations list from localStorage
@@ -53,68 +72,80 @@ export function getLocalCreations(): CreationRecord[] {
 }
 
 /**
- * Asynchronously loads all creations, hydrating from IndexedDB if needed
+ * Asynchronously loads all creations, merging durable IndexedDB records with
+ * the localStorage cache so notes created before the IDB migration are never hidden.
  */
 export async function getAllCreationsHydrated(): Promise<CreationRecord[]> {
+  const local = getLocalCreations();
+  let fromIdb: CreationRecord[] = [];
   try {
-    const fromIdb = await idbGetAllCreations();
-    if (fromIdb && fromIdb.length > 0) {
-      // Sync IDB creations to local storage cache if localStorage is empty
-      const local = getLocalCreations();
-      if (local.length === 0) {
-        saveToLocalStorageSafe(fromIdb.slice(0, MAX_LOCAL_CREATIONS_CACHE));
-      }
-      return fromIdb;
-    }
+    fromIdb = await idbGetAllCreations();
   } catch (e) {
     console.warn('IDB hydration check:', e);
   }
-  return getLocalCreations();
+
+  if (!fromIdb || fromIdb.length === 0) {
+    return local;
+  }
+
+  const creationKey = (item: CreationRecord) =>
+    (item.title || '').trim().toLowerCase().replace(/\.md$/i, '') || item.id;
+
+  const merged = new Map<string, CreationRecord>();
+  for (const item of local) {
+    merged.set(creationKey(item), item);
+  }
+  for (const item of fromIdb) {
+    const key = creationKey(item);
+    const cached = merged.get(key);
+    merged.set(key, {
+      ...cached,
+      ...item, // The IndexedDB copy is authoritative for full content
+      driveFileId: item.driveFileId || cached?.driveFileId,
+      driveWebViewLink: item.driveWebViewLink || cached?.driveWebViewLink,
+    });
+  }
+
+  // Repopulate the localStorage cache if it was empty (fresh profile or cleared cache)
+  if (local.length === 0) {
+    saveToLocalStorageSafe(fromIdb.slice(0, MAX_LOCAL_CREATIONS_CACHE));
+  }
+
+  return Array.from(merged.values()).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
 }
 
 /**
- * Safely writes to localStorage with automatic quota management and LRU eviction.
- * If quota is reached, trims markdownContent from older items while preserving them in IndexedDB.
+ * Writes the creation list to localStorage within a safe size budget.
+ * Oversized lists are stored as lightweight previews so the browser quota is
+ * never hammered with repeated giant writes; full content stays in IndexedDB.
  */
 function saveToLocalStorageSafe(items: CreationRecord[]): boolean {
   if (typeof window === 'undefined') return false;
 
-  let candidate = [...items];
+  let candidate = items.slice(0, MAX_LOCAL_CREATIONS_CACHE);
 
-  // Try direct write first
+  // Estimate the UTF-16 footprint BEFORE writing. If the full-fidelity list
+  // would exceed the budget, cache previews instead of risking quota errors.
+  try {
+    if (JSON.stringify(candidate).length * 2 > LOCAL_CACHE_BUDGET_BYTES) {
+      candidate = candidate.map(stubLocalContent);
+    }
+  } catch {
+    candidate = candidate.map(stubLocalContent);
+  }
+
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(candidate));
     return true;
   } catch (err) {
-    console.warn('localStorage quota reached or write error. Initiating graceful eviction:', err);
+    console.warn('localStorage write failed. Falling back to a minimal stub cache:', err);
   }
 
-  // Strategy 1: Keep top 20 items with full content, stub markdownContent on remaining items
+  // Last-resort fallback: keep only the 10 most recent notes as stub previews.
   try {
-    candidate = candidate.map((item, idx) => {
-      if (idx >= 15 && item.markdownContent && item.markdownContent.length > 200) {
-        return {
-          ...item,
-          markdownContent: item.markdownContent.slice(0, 200) + '\n\n*(Full content preserved in IndexedDB/Drive)*',
-          contentStubbed: true,
-        };
-      }
-      return item;
-    });
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(candidate.slice(0, 25)));
-    return true;
-  } catch (err2) {
-    console.warn('Strategy 1 failed, trying minimal stub cache:', err2);
-  }
-
-  // Strategy 2: Keep only top 10 recent items as stubs
-  try {
-    const minimal = candidate.slice(0, 10).map((item) => ({
-      ...item,
-      markdownContent: item.markdownContent.slice(0, 150),
-      contentStubbed: true,
-    }));
+    const minimal = candidate.slice(0, 10).map(stubLocalContent);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(minimal));
     return true;
   } catch (err3) {
@@ -212,6 +243,19 @@ export async function getFullCreationContent(id: string): Promise<string | null>
 }
 
 /**
+ * Normalizes a creation title or exported file name for Drive linkage matching.
+ * Strips the markdown extension and the app's "-summary" export suffix.
+ */
+function normalizeTitleForMatch(value: string): string {
+  return (value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\.md$/i, '')
+    .replace(/[-_\s]+summary$/i, '')
+    .trim();
+}
+
+/**
  * Updates an existing creation with Google Drive sync metadata
  */
 export function updateCreationDriveInfo(
@@ -220,30 +264,72 @@ export function updateCreationDriveInfo(
   driveWebViewLink?: string
 ): void {
   const existing = getLocalCreations();
-  const clean = identifier.trim().toLowerCase().replace(/\.md$/i, '');
+  const cleanTitle = normalizeTitleForMatch(identifier);
 
-  let foundItem: CreationRecord | null = null;
-  const updated = existing.map((item) => {
-    const itemTitle = item.title.trim().toLowerCase().replace(/\.md$/i, '');
-    if (item.id === identifier || itemTitle === clean) {
-      const updatedItem: CreationRecord = {
-        ...item,
-        driveFileId,
-        driveWebViewLink: driveWebViewLink || item.driveWebViewLink,
-        source: 'both' as const,
-      };
-      foundItem = updatedItem;
-      return updatedItem;
+  let bestIdx = -1;
+  let bestScore = 0;
+  existing.forEach((item, idx) => {
+    if (item.id === identifier) {
+      if (bestScore < 3) {
+        bestIdx = idx;
+        bestScore = 3;
+      }
+      return;
     }
-    return item;
+    const itemTitle = normalizeTitleForMatch(item.title);
+    if (!itemTitle || !cleanTitle) return;
+    if (itemTitle === cleanTitle) {
+      if (bestScore < 2) {
+        bestIdx = idx;
+        bestScore = 2;
+      }
+      return;
+    }
+    // Exported file names can be truncated versions of the note title
+    // (e.g. "<title cut at 40 chars>-summary.md"), so allow prefix matches.
+    const shorter = itemTitle.length <= cleanTitle.length ? itemTitle : cleanTitle;
+    const longer = itemTitle.length <= cleanTitle.length ? cleanTitle : itemTitle;
+    if (shorter.length >= 12 && longer.startsWith(shorter) && bestScore < 1) {
+      bestIdx = idx;
+      bestScore = 1;
+    }
   });
 
-  if (foundItem) {
-    saveToLocalStorageSafe(updated);
-    try {
-      idbSaveCreation(foundItem).catch(() => {});
-    } catch {}
-  }
+  if (bestIdx < 0) return;
+
+  const target = existing[bestIdx];
+  const updatedItem: CreationRecord = {
+    ...target,
+    driveFileId,
+    driveWebViewLink: driveWebViewLink || target.driveWebViewLink,
+    source: 'both' as const,
+  };
+
+  const updated = existing.map((item, idx) => (idx === bestIdx ? updatedItem : item));
+  saveToLocalStorageSafe(updated);
+
+  try {
+    if (target.contentStubbed) {
+      // Merge the Drive metadata into the durable copy instead of replacing
+      // full IndexedDB content with a quota-stubbed cache entry.
+      idbGetCreation(target.id)
+        .then((durable) =>
+          idbSaveCreation(
+            durable
+              ? {
+                  ...durable,
+                  driveFileId,
+                  driveWebViewLink: driveWebViewLink || durable.driveWebViewLink,
+                  source: 'both' as const,
+                }
+              : updatedItem
+          )
+        )
+        .catch(() => {});
+    } else {
+      idbSaveCreation(updatedItem).catch(() => {});
+    }
+  } catch {}
 }
 
 /**
@@ -327,11 +413,7 @@ export function pruneSyncedCreations(): { freedCount: number } {
   const optimized = items.map((item) => {
     if (item.driveFileId && item.markdownContent && !item.contentStubbed) {
       freedCount++;
-      return {
-        ...item,
-        markdownContent: item.markdownContent.slice(0, 150) + '\n\n*(Full version available in Google Drive)*',
-        contentStubbed: true,
-      };
+      return stubLocalContent(item);
     }
     return item;
   });
@@ -378,15 +460,16 @@ export async function importCreationsBackup(
 
     let count = 0;
     const current = getLocalCreations();
-    const existingTitles = new Set(current.map((c) => c.title.toLowerCase().trim()));
+    const indexByTitle = new Map(current.map((c, idx) => [c.title.toLowerCase().trim(), idx]));
 
     const merged = [...current];
 
     for (const item of list) {
       if (!item.title || !item.markdownContent) continue;
       const cleanTitle = item.title.toLowerCase().trim();
+      const existingIdx = indexByTitle.get(cleanTitle);
 
-      if (!existingTitles.has(cleanTitle)) {
+      if (existingIdx === undefined) {
         const record: CreationRecord = {
           id: item.id || `imported_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           title: item.title,
@@ -402,12 +485,34 @@ export async function importCreationsBackup(
         };
 
         merged.push(record);
-        existingTitles.add(cleanTitle);
+        indexByTitle.set(cleanTitle, merged.length - 1);
         count++;
 
         // Also save to IndexedDB
         try {
           await idbSaveCreation(record);
+        } catch {}
+        continue;
+      }
+
+      // Title already exists: normally a duplicate, but if the cached copy is
+      // only a stub (trimmed to keep localStorage light), restore full content.
+      const existing = merged[existingIdx];
+      const incomingIsStub =
+        item.contentStubbed === true || item.markdownContent.includes(STUB_MARKER);
+      if (existing?.contentStubbed && !incomingIsStub) {
+        const restored: CreationRecord = {
+          ...existing,
+          markdownContent: item.markdownContent,
+          contentStubbed: false,
+          sizeBytes: item.sizeBytes || new Blob([item.markdownContent]).size,
+          driveFileId: existing.driveFileId || item.driveFileId,
+          driveWebViewLink: existing.driveWebViewLink || item.driveWebViewLink,
+        };
+        merged[existingIdx] = restored;
+        count++;
+        try {
+          await idbSaveCreation(restored);
         } catch {}
       }
     }

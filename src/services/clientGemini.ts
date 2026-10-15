@@ -71,25 +71,46 @@ export function cleanAndParseJson<T = any>(rawText: string): T {
     return JSON.parse(text);
   } catch {}
 
-  // Find outer braces
+  // Find the outermost JSON object or array
   const firstBrace = text.indexOf('{');
   const lastBrace = text.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    const candidate = text.slice(firstBrace, lastBrace + 1);
-    try {
-      return JSON.parse(candidate);
-    } catch {}
-  }
-
-  // Find outer array
   const firstBracket = text.indexOf('[');
   const lastBracket = text.lastIndexOf(']');
-  if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-    const candidate = text.slice(firstBracket, lastBracket + 1);
-    try {
-      return JSON.parse(candidate);
-    } catch {}
-  }
+  const isObjectFirst = firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket);
+
+  const candidate = isObjectFirst && lastBrace > firstBrace
+    ? text.slice(firstBrace, lastBrace + 1)
+    : firstBracket !== -1 && lastBracket > firstBracket
+      ? text.slice(firstBracket, lastBracket + 1)
+      : text;
+
+  try {
+    return JSON.parse(candidate);
+  } catch {}
+
+  // Repair common LLM formatting anomalies (trailing commas, control characters)
+  let repaired = candidate
+    .replace(/,\s*([}\]])/g, '$1')
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, (char) => (char === '\n' || char === '\r' || char === '\t' ? char : ''));
+
+  try {
+    return JSON.parse(repaired);
+  } catch {}
+
+  // Auto-close truncated JSON if the model output ended abruptly
+  try {
+    const openBraces = (repaired.match(/\{/g) || []).length;
+    const closeBraces = (repaired.match(/\}/g) || []).length;
+    const openBrackets = (repaired.match(/\[/g) || []).length;
+    const closeBrackets = (repaired.match(/\]/g) || []).length;
+    if (openBrackets > closeBrackets) {
+      repaired += ']'.repeat(openBrackets - closeBrackets);
+    }
+    if (openBraces > closeBraces) {
+      repaired += '}'.repeat(openBraces - closeBraces);
+    }
+    return JSON.parse(repaired);
+  } catch {}
 
   throw new Error('Could not parse structured JSON from the model response.');
 }
@@ -107,6 +128,7 @@ export async function generateFullNotesClientDirect(params: {
   creatorChapters?: { startSec: number; title: string }[];
   videoDescription?: string;
   officialTranscript?: any[];
+  abortSignal?: AbortSignal;
   onProgress?: (message: string) => void;
 }): Promise<{
   report: FullAnalysisReport;
@@ -121,6 +143,7 @@ export async function generateFullNotesClientDirect(params: {
     creatorChapters = [],
     videoDescription = '',
     officialTranscript = [],
+    abortSignal,
     onProgress,
   } = params;
 
@@ -248,8 +271,8 @@ Return STRICT JSON:
           },
         ],
         config: {
-          temperature: 0.1,
           responseMimeType: 'application/json',
+          abortSignal,
         },
       });
 
@@ -357,6 +380,10 @@ Return STRICT JSON:
 
       return { report, modelUsed: model };
     } catch (err: any) {
+      // Respect user cancellation: never rotate models or mask the abort.
+      if (abortSignal?.aborted || err?.name === 'AbortError') {
+        throw err;
+      }
       console.warn(`Direct model ${model} attempt failed:`, sanitizeErrorMessage(err));
       lastError = err;
       // If error is 401/invalid key, do not retry other models as key is invalid
@@ -383,6 +410,7 @@ export async function analyzeChunkClientDirect(params: {
   topicContextHint?: string;
   videoDescription?: string;
   totalDurationSec?: number;
+  abortSignal?: AbortSignal;
 }): Promise<any> {
   const {
     apiKey,
@@ -394,6 +422,7 @@ export async function analyzeChunkClientDirect(params: {
     nominalEndSec,
     topicContextHint,
     videoDescription,
+    abortSignal,
   } = params;
 
   if (!apiKey || !apiKey.trim()) {
@@ -469,8 +498,8 @@ Return STRICT JSON:
           },
         ],
         config: {
-          temperature: 0.1,
           responseMimeType: 'application/json',
+          abortSignal,
         },
       });
 
@@ -489,6 +518,10 @@ Return STRICT JSON:
         modelUsed: model,
       };
     } catch (err: any) {
+      // Respect user cancellation: never rotate models or mask the abort.
+      if (abortSignal?.aborted || err?.name === 'AbortError') {
+        throw err;
+      }
       console.warn(`Direct chunk analysis ${model} attempt failed:`, sanitizeErrorMessage(err));
       lastError = err;
       if (/API_KEY_INVALID|invalid.*api.*key|permission denied/i.test(err?.message || '')) {

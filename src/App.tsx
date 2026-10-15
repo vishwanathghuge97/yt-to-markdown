@@ -43,8 +43,8 @@ import {
 } from 'lucide-react';
 
 type AnalysisPhase = 'reading' | 'analyzing' | 'preparing';
-// Videos under 45 minutes (or 90 mins with official captions) can be analyzed
-// in a single fast grounded pass without fragmentation. Longer videos use adaptive timed windows.
+// Videos under 45 minutes can be analyzed in a single fast grounded pass
+// without fragmentation. Longer videos use adaptive timed windows.
 const SINGLE_PASS_MAX_DURATION_SEC = 45 * 60;
 
 async function apiErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -172,8 +172,9 @@ export default function App() {
 
   const handleCancelAnalysis = () => {
     if (abortControllerRef.current) {
+      // Keep the controller until the running analysis loop observes the
+      // abort signal; the loop's own `finally` block clears it afterwards.
       abortControllerRef.current.abort();
-      abortControllerRef.current = null;
     }
     setIsAnalyzing(false);
     setStatusMessage('');
@@ -259,7 +260,9 @@ export default function App() {
 
     setInputError('');
     setIsAnalyzing(true);
-    abortControllerRef.current = new AbortController();
+    const analysisController = new AbortController();
+    abortControllerRef.current = analysisController;
+    const analysisSignal = analysisController.signal;
     setProgressPercent(5);
     setAnalysisPhase('reading');
     setKeyRotationNotice('');
@@ -282,13 +285,13 @@ export default function App() {
         const infoController = new AbortController();
         const infoTimeout = setTimeout(() => infoController.abort(), 12000);
         const onUserAbort = () => infoController.abort();
-        abortControllerRef.current?.signal.addEventListener('abort', onUserAbort, { once: true });
+        analysisSignal.addEventListener('abort', onUserAbort, { once: true });
         let infoRes: Response;
         try {
           infoRes = await fetch(`/api/youtube/info?url=${encodeURIComponent(url)}`, { signal: infoController.signal });
         } finally {
           clearTimeout(infoTimeout);
-          abortControllerRef.current?.signal.removeEventListener('abort', onUserAbort);
+          analysisSignal.removeEventListener('abort', onUserAbort);
         }
         if (infoRes.ok) {
           const info = await infoRes.json();
@@ -367,6 +370,7 @@ export default function App() {
               durationSec,
               creatorChapters,
               videoDescription: description,
+              abortSignal: analysisSignal,
               onProgress: (msg) => {
                 setStatusMessage(msg);
                 addLog(msg);
@@ -392,6 +396,9 @@ export default function App() {
               addLog(`✓ Direct Gemini analysis completed successfully (${directRes.modelUsed})!`);
             }
           } catch (directErr: any) {
+            if (analysisSignal.aborted || directErr?.name === 'AbortError') {
+              throw directErr;
+            }
             console.warn('Direct client generation notice:', sanitizeErrorMessage(directErr));
             addLog(`Direct note generation noticed: ${sanitizeErrorMessage(directErr)}`);
             // Check if key rotation is needed
@@ -532,7 +539,7 @@ export default function App() {
           }
         }
       } catch (fastErr: any) {
-        if (fastErr?.stopFallback) throw fastErr;
+        if (fastErr?.stopFallback || analysisSignal.aborted || fastErr?.name === 'AbortError') throw fastErr;
         addLog(`Single-pass notice: ${sanitizeErrorMessage(fastErr)}. Automatically proceeding with multi-segment window analysis...`);
       }
 
@@ -557,6 +564,9 @@ export default function App() {
 
       // 4. Process each segment sequentially with real-time feedback
       for (let i = 0; i < planned.length; i++) {
+        if (analysisSignal.aborted) {
+          throw new DOMException('Analysis cancelled', 'AbortError');
+        }
         const chunk = planned[i];
         setActiveChunkIndex(i);
 
@@ -597,6 +607,7 @@ export default function App() {
                   topicContextHint: segTitle,
                   videoDescription: description,
                   totalDurationSec: durationSec,
+                  abortSignal: analysisSignal,
                 });
                 analysisResult = {
                   chunkIndex: i,
@@ -693,6 +704,10 @@ export default function App() {
             chunkSuccess = true;
             break;
           } catch (err: any) {
+            // Stop immediately on user cancellation instead of retrying.
+            if (analysisSignal.aborted || err?.name === 'AbortError') {
+              throw err;
+            }
             lastChunkErr = err;
             if (attempt < 2) {
               addLog(`Segment ${i + 1} attempt ${attempt + 1} notice: ${err.message}. Retrying in 1.5s...`);
@@ -724,10 +739,26 @@ export default function App() {
             scientificEntities: [],
           };
           chunkResults.push(fallbackResult);
+          // Keep the final transcript continuous even when a segment fell back.
+          if (i > 0) {
+            const fallbackDedupe = deduplicateOverlapEntries(
+              cumulativeTranscript,
+              fallbackResult.transcript,
+              chunk.nominalStartSec,
+              20
+            );
+            cumulativeTranscript = fallbackDedupe.merged;
+          } else {
+            cumulativeTranscript = [...fallbackResult.transcript];
+          }
           setPlannedChunks((prev) =>
             prev.map((c, idx) => (idx === i ? { ...c, status: 'completed' } : c))
           );
         }
+      }
+
+      if (analysisSignal.aborted) {
+        throw new DOMException('Analysis cancelled', 'AbortError');
       }
 
       setProgressPercent(90);
@@ -781,7 +812,7 @@ export default function App() {
       setStatusMessage('Markdown generation complete!');
       addLog(`Markdown document created successfully (${fullReport.markdownContent.split('\n').length} lines).`);
     } catch (err: any) {
-      if (err.name === 'AbortError' || abortControllerRef.current?.signal.aborted) {
+      if (err?.name === 'AbortError' || analysisSignal.aborted) {
         addLog('Analysis cancelled.');
         setStatusMessage('');
         return;
@@ -794,7 +825,10 @@ export default function App() {
     } finally {
       setIsAnalyzing(false);
       setActiveChunkIndex(-1);
-      abortControllerRef.current = null;
+      // Only clear the ref when it still belongs to this analysis run.
+      if (abortControllerRef.current === analysisController) {
+        abortControllerRef.current = null;
+      }
     }
   };
 
@@ -833,6 +867,7 @@ export default function App() {
 
   const isSinglePassAnalysis = isAnalyzing && (
     statusMessage.startsWith('Generating structured notes') ||
+    statusMessage.startsWith('Contacting Google Gemini directly') ||
     statusMessage.startsWith('Compiling final Markdown')
   );
   const estimatedWait = currentVideoMeta
@@ -862,7 +897,6 @@ export default function App() {
         onClose={() => setIsApiKeyModalOpen(false)}
         apiKey={customApiKeys.join('\n')}
         onSaveKey={handleSaveApiKey}
-        hasEnvKey={true}
         initialPersist={isPersistedLocally}
       />
 

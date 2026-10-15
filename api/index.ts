@@ -320,9 +320,7 @@ async function generateWithCascade(
       // Try model with 1 transient retry on 503 / 429
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          const config: any = {
-            temperature: 0.1,
-          };
+          const config: any = {};
           if (jsonMode) {
             config.responseMimeType = 'application/json';
           }
@@ -394,9 +392,7 @@ async function generateWithCascade(
 
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const config: any = {
-          temperature: 0.1,
-        };
+        const config: any = {};
         if (jsonMode) {
           config.responseMimeType = 'application/json';
         }

@@ -71,5 +71,5 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 - **Frontend**: React 19, TypeScript, Tailwind CSS v4, Lucide Icons
 - **Backend**: Express (Vercel Serverless Function compatible)
-- **AI Engine**: Google Gen AI SDK (`@google/genai`), `gemini-2.5-flash`
+- **AI Engine**: Google Gen AI SDK (`@google/genai`), `gemini-flash-latest` with `gemini-3.8-flash` / `gemini-3.1-flash-lite` fallbacks
 - **Auth & Storage**: Firebase Auth, Google Drive REST API v3

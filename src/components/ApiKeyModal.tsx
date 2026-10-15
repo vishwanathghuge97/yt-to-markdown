@@ -6,7 +6,6 @@ interface ApiKeyModalProps {
   onClose: () => void;
   apiKey: string;
   onSaveKey: (key: string, persist: boolean) => void;
-  hasEnvKey: boolean;
   initialPersist?: boolean;
 }
 
@@ -15,7 +14,6 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
   onClose,
   apiKey,
   onSaveKey,
-  hasEnvKey,
   initialPersist = true,
 }) => {
   const [keyValues, setKeyValues] = useState<string[]>(['']);
