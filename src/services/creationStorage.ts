@@ -3,7 +3,6 @@ import {
   idbGetAllCreations,
   idbDeleteCreation,
   idbGetCreation,
-  idbClearAllCreations,
 } from './storageDb';
 
 export interface CreationRecord {
@@ -38,6 +37,32 @@ const ESTIMATED_LOCAL_STORAGE_LIMIT = 5 * 1024 * 1024; // ~5MB standard browser 
 const LOCAL_CACHE_BUDGET_BYTES = 2 * 1024 * 1024;
 const STUB_MARKER = '\n\n*(Full content preserved in IndexedDB/Drive)*';
 const LOCAL_PREVIEW_CHARS = 1500;
+
+/**
+ * True when a cached markdown body is only a lightweight preview (the full text
+ * lives in IndexedDB/Drive). Handles both the current marker and the legacy
+ * Drive-prune marker so old cached stubs still hydrate correctly.
+ */
+export function isStubbedContent(value: string | null | undefined): boolean {
+  if (typeof value !== 'string') return false;
+  return (
+    value.includes(STUB_MARKER) ||
+    value.includes('Full content preserved in IndexedDB') ||
+    value.includes('Full version available in Google Drive')
+  );
+}
+
+/**
+ * Stable merge key for deduplicating records: canonical video URL when known,
+ * otherwise the normalized title, otherwise the record id. Used by both the
+ * localStorage/IndexedDB hydration merge and backup import.
+ */
+function creationMatchKey(item: Pick<CreationRecord, 'id' | 'title' | 'videoUrl'>): string {
+  const url = (item.videoUrl || '').trim().toLowerCase();
+  if (url) return `url:${url}`;
+  const title = (item.title || '').trim().toLowerCase().replace(/\.md$/i, '');
+  return title ? `title:${title}` : `id:${item.id}`;
+}
 
 /**
  * Converts a record into a lightweight cache entry (metadata + short preview).
@@ -88,15 +113,14 @@ export async function getAllCreationsHydrated(): Promise<CreationRecord[]> {
     return local;
   }
 
-  const creationKey = (item: CreationRecord) =>
-    (item.title || '').trim().toLowerCase().replace(/\.md$/i, '') || item.id;
-
+  // Prefer the canonical video URL as the merge key so two different videos
+  // that happen to share a title never collapse into one record.
   const merged = new Map<string, CreationRecord>();
   for (const item of local) {
-    merged.set(creationKey(item), item);
+    merged.set(creationMatchKey(item), item);
   }
   for (const item of fromIdb) {
-    const key = creationKey(item);
+    const key = creationMatchKey(item);
     const cached = merged.get(key);
     merged.set(key, {
       ...cached,
@@ -169,10 +193,14 @@ export function saveLocalCreation(params: {
   const existing = getLocalCreations();
   const cleanTitle = params.title.trim();
 
-  // Check if an existing creation matches by exact title to update it instead of creating duplicates
-  const existingIdx = existing.findIndex(
-    (item) => item.title.toLowerCase() === cleanTitle.toLowerCase()
-  );
+  // Match by canonical video URL first (stable per video), then by title as a
+  // fallback for legacy records saved before URLs were stored. Different videos
+  // that share a title are kept as separate records.
+  const cleanUrl = (params.videoUrl || '').trim().toLowerCase();
+  const existingIdx = existing.findIndex((item) => {
+    if (cleanUrl && item.videoUrl) return item.videoUrl.trim().toLowerCase() === cleanUrl;
+    return item.title.toLowerCase() === cleanTitle.toLowerCase();
+  });
 
   const size = new Blob([params.markdownContent]).size;
 
@@ -219,34 +247,38 @@ export function saveLocalCreation(params: {
 
 /**
  * Retrieves the full markdown content of a creation, fetching from IndexedDB
- * if the localStorage version was stubbed due to quota limits.
+ * if the localStorage version was stubbed due to quota limits. Returns null
+ * (instead of a truncated preview) when no durable copy exists, so callers can
+ * fall back to Google Drive.
  */
 export async function getFullCreationContent(id: string): Promise<string | null> {
   // Check local storage first
   const localList = getLocalCreations();
   const found = localList.find((item) => item.id === id);
-  if (found && !found.contentStubbed && found.markdownContent) {
+  if (found && !found.contentStubbed && !isStubbedContent(found.markdownContent) && found.markdownContent) {
     return found.markdownContent;
   }
 
   // Fallback to IndexedDB
   try {
     const idbItem = await idbGetCreation(id);
-    if (idbItem && idbItem.markdownContent) {
+    if (idbItem && idbItem.markdownContent && !isStubbedContent(idbItem.markdownContent)) {
       return idbItem.markdownContent;
     }
   } catch (e) {
     console.warn('Error reading from IDB:', e);
   }
 
-  return found?.markdownContent || null;
+  // No durable copy: signal the caller so it can try Drive instead of showing a preview.
+  return null;
 }
 
 /**
  * Normalizes a creation title or exported file name for Drive linkage matching.
  * Strips the markdown extension and the app's "-summary" export suffix.
+ * Exported so the history drawer can merge Drive files with local notes identically.
  */
-function normalizeTitleForMatch(value: string): string {
+export function normalizeTitleForMatch(value: string): string {
   return (value || '')
     .trim()
     .toLowerCase()
@@ -460,14 +492,14 @@ export async function importCreationsBackup(
 
     let count = 0;
     const current = getLocalCreations();
-    const indexByTitle = new Map(current.map((c, idx) => [c.title.toLowerCase().trim(), idx]));
+    const indexByKey = new Map(current.map((c, idx) => [creationMatchKey(c), idx]));
 
     const merged = [...current];
 
     for (const item of list) {
       if (!item.title || !item.markdownContent) continue;
-      const cleanTitle = item.title.toLowerCase().trim();
-      const existingIdx = indexByTitle.get(cleanTitle);
+      const key = creationMatchKey(item);
+      const existingIdx = indexByKey.get(key);
 
       if (existingIdx === undefined) {
         const record: CreationRecord = {
@@ -485,7 +517,7 @@ export async function importCreationsBackup(
         };
 
         merged.push(record);
-        indexByTitle.set(cleanTitle, merged.length - 1);
+        indexByKey.set(key, merged.length - 1);
         count++;
 
         // Also save to IndexedDB
@@ -495,11 +527,10 @@ export async function importCreationsBackup(
         continue;
       }
 
-      // Title already exists: normally a duplicate, but if the cached copy is
+      // Key already exists: normally a duplicate, but if the cached copy is
       // only a stub (trimmed to keep localStorage light), restore full content.
       const existing = merged[existingIdx];
-      const incomingIsStub =
-        item.contentStubbed === true || item.markdownContent.includes(STUB_MARKER);
+      const incomingIsStub = item.contentStubbed === true || isStubbedContent(item.markdownContent);
       if (existing?.contentStubbed && !incomingIsStub) {
         const restored: CreationRecord = {
           ...existing,
