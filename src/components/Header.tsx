@@ -3,6 +3,7 @@ import { User } from 'firebase/auth';
 import { LogOut, HardDrive, Sun, Moon, Key, AlertCircle, X } from 'lucide-react';
 import { googleSignIn, logout, formatAuthError } from '../services/firebase';
 import { BrandMark } from './BrandMark';
+import { DRIVE_ENABLED } from '../shared/features';
 
 interface HeaderProps {
   user: User | null;
@@ -107,8 +108,8 @@ export const Header: React.FC<HeaderProps> = ({
             {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
-          {/* Google Drive Connect */}
-          {user ? (
+          {/* Google Drive Connect (hidden while the Drive feature is off) */}
+          {DRIVE_ENABLED && (user ? (
             <div className="flex items-center space-x-1 sm:space-x-1.5 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg pl-2.5 pr-1 py-1 text-xs min-h-[40px]">
               <span className="hidden min-[360px]:inline-block font-mono text-zinc-700 dark:text-zinc-300 truncate max-w-[64px] sm:max-w-[110px] text-[11px] sm:text-xs">
                 {user.email?.split('@')[0]}
@@ -151,7 +152,7 @@ export const Header: React.FC<HeaderProps> = ({
               <HardDrive className="w-3.5 h-3.5 sm:mr-0.5 text-zinc-500 shrink-0" />
               <span className="hidden sm:inline">{isSigningIn ? 'Connecting...' : 'Connect Drive'}</span>
             </button>
-          )}
+          ))}
         </div>
       </div>
 

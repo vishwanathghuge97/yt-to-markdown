@@ -9,6 +9,7 @@ import {
   isAuthRequiredError,
 } from '../services/googleDrive';
 import { googleSignIn, formatAuthError, auth } from '../services/firebase';
+import { DRIVE_ENABLED } from '../shared/features';
 import {
   getLocalCreations,
   deleteLocalCreation,
@@ -86,7 +87,7 @@ async function resolveFullContent(item: UnifiedCreation): Promise<string | null>
     console.warn('Local content lookup failed:', err);
   }
 
-  if (item.driveFileId) {
+  if (DRIVE_ENABLED && item.driveFileId) {
     try {
       return await fetchDriveFileContent(item.driveFileId);
     } catch (err) {
@@ -207,6 +208,8 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   );
 
   useEffect(() => {
+    // Drive feature off: nothing to sync and no auth state to reflect.
+    if (!DRIVE_ENABLED) return;
     if (user) {
       loadDriveFiles(false);
     } else {
@@ -454,7 +457,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       // If it exists in Drive and Drive is connected, delete from Drive too.
       // A Drive failure is reported explicitly instead of silently claiming success.
       let driveDeleteFailed = false;
-      if (item.driveFileId && user) {
+      if (DRIVE_ENABLED && item.driveFileId && user) {
         try {
           await deleteDriveFile(item.driveFileId);
           setDriveFiles((prev) => prev.filter((f) => f.id !== item.driveFileId));
@@ -523,7 +526,9 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               )}
             </div>
             <p className="text-xs font-mono text-zinc-500 dark:text-zinc-400">
-              Persistent storage in browser and synchronized with Google Drive
+              {DRIVE_ENABLED
+                ? 'Persistent storage in browser and synchronized with Google Drive'
+                : 'Persistent storage in your browser'}
             </p>
           </div>
         </div>
@@ -535,7 +540,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
             </span>
           )}
 
-          {user ? (
+          {DRIVE_ENABLED && (user ? (
             needsReauth ? (
               <button
                 type="button"
@@ -577,12 +582,12 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               <HardDrive className="w-3.5 h-3.5" />
               <span>Connect Drive</span>
             </button>
-          )}
+          ))}
         </div>
       </div>
 
-      {/* Production / Vercel Domain Notice Banner if auth failed */}
-      {authErrorMessage && (
+      {/* Production / Vercel Domain Notice Banner if auth failed (Drive only) */}
+      {DRIVE_ENABLED && authErrorMessage && (
         <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2.5">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
           <div className="space-y-1">
@@ -597,7 +602,8 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       {/* Tabs & Search */}
       {unifiedCreations.length > 0 && (
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
-          {/* Tabs */}
+          {/* Tabs (the Drive filter exists only while the Drive feature is on) */}
+          {DRIVE_ENABLED && (
           <div className="inline-flex flex-wrap rounded-lg bg-zinc-100 dark:bg-zinc-800/80 p-1 text-xs sm:text-[13px] font-mono">
             <button
               type="button"
@@ -638,6 +644,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               <span>Local ({localOnlyCount})</span>
             </button>
           </div>
+          )}
 
           {/* Search box */}
           <div className="relative flex-1 sm:max-w-xs">
@@ -665,10 +672,11 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               No saved creations yet
             </h4>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed">
-              When you generate notes for any YouTube video above, they will automatically be preserved here and can be exported directly to your Google Drive.
+              When you generate notes for any YouTube video above, they will automatically be preserved
+              here{DRIVE_ENABLED ? ' and can be exported directly to your Google Drive.' : '.'}
             </p>
           </div>
-          {!user && (
+          {DRIVE_ENABLED && !user && (
             <button
               type="button"
               onClick={handleConnectDrive}
@@ -794,7 +802,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                         </button>
 
                         {/* If note is local only, show quick Save to Drive button */}
-                        {!item.driveFileId && item.markdownContent && user && (
+                        {DRIVE_ENABLED && !item.driveFileId && item.markdownContent && user && (
                           <button
                             type="button"
                             onClick={() => handleSaveToDrive(item)}

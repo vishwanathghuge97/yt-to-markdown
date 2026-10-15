@@ -8,7 +8,8 @@ import { useCopiedFlag } from '../hooks/useCopiedFlag';
 interface MarkdownOutputViewProps {
   videoTitle: string;
   markdownContent: string;
-  onOpenDriveModal: () => void;
+  /** Omitted while the Drive feature is off; hides the Drive export button. */
+  onOpenDriveModal?: () => void;
 }
 
 export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
@@ -118,16 +119,18 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
               <span>Download</span>
             </button>
 
-            {/* Save to Drive */}
-            <button
-              onClick={onOpenDriveModal}
-              className="btn btn-secondary px-2.5 py-1.5 min-h-[40px] sm:min-h-[32px] text-[11px] font-mono"
-              title="Save copy to Google Drive"
-              aria-label="Save to Google Drive"
-            >
-              <HardDrive className="w-3.5 h-3.5 text-zinc-500" />
-              <span>Drive</span>
-            </button>
+            {/* Save to Drive (only when the Drive feature is available) */}
+            {onOpenDriveModal && (
+              <button
+                onClick={onOpenDriveModal}
+                className="btn btn-secondary px-2.5 py-1.5 min-h-[40px] sm:min-h-[32px] text-[11px] font-mono"
+                title="Save copy to Google Drive"
+                aria-label="Save to Google Drive"
+              >
+                <HardDrive className="w-3.5 h-3.5 text-zinc-500" />
+                <span>Drive</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

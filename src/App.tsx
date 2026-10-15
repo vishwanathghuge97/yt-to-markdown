@@ -25,6 +25,7 @@ import {
   analyzeChunkClientDirect,
 } from './services/clientGemini';
 import { sanitizeErrorMessage, isInvalidApiKeyError, isQuotaError } from './shared/gemini';
+import { DRIVE_ENABLED } from './shared/features';
 import { extractYouTubeVideoId } from './shared/youtubeUrl';
 import { saveLocalCreation } from './services/creationStorage';
 import { initAuth } from './services/firebase';
@@ -160,8 +161,9 @@ export default function App() {
       ?.setAttribute('content', darkMode ? '#09090b' : '#fafafa');
   }, [darkMode]);
 
-  // Auth listener
+  // Auth listener (Drive feature only; skipped entirely while Drive is off)
   useEffect(() => {
+    if (!DRIVE_ENABLED) return;
     const unsubscribe = initAuth(
       (authenticatedUser) => setUser(authenticatedUser),
       () => setUser(null)
@@ -926,7 +928,7 @@ export default function App() {
       <Header
         user={user}
         onAuthChange={setUser}
-        onOpenDriveModal={() => setIsDriveModalOpen(true)}
+        onOpenDriveModal={DRIVE_ENABLED ? () => setIsDriveModalOpen(true) : undefined}
         hasReport={!!(report && report.markdownContent)}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
@@ -1205,7 +1207,7 @@ export default function App() {
           <MarkdownOutputView
             videoTitle={report.metadata.title}
             markdownContent={report.markdownContent}
-            onOpenDriveModal={() => setIsDriveModalOpen(true)}
+            onOpenDriveModal={DRIVE_ENABLED ? () => setIsDriveModalOpen(true) : undefined}
           />
         )}
 
@@ -1220,12 +1222,14 @@ export default function App() {
 
       <footer className="w-full max-w-4xl sm:max-w-5xl 2xl:max-w-6xl mx-auto px-3 sm:px-6 pt-1 pb-5 sm:pb-6">
         <p className="text-center text-xs text-zinc-400 dark:text-zinc-600">
-          Notes stay in your browser or your own Google Drive.
+          {DRIVE_ENABLED
+            ? 'Notes stay in your browser or your own Google Drive.'
+            : 'Notes stay in your browser.'}
         </p>
       </footer>
 
-      {/* Google Drive Export Modal */}
-      {report && (
+      {/* Google Drive Export Modal (hidden while the Drive feature is off) */}
+      {DRIVE_ENABLED && report && (
         <DriveExportModal
           isOpen={isDriveModalOpen}
           onClose={closeDriveModal}
