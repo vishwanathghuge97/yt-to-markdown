@@ -1005,7 +1005,7 @@ export default function App() {
                       if (inputError) setInputError('');
                     }}
                     placeholder="Paste YouTube link (e.g. youtube.com/watch?v=...)"
-                    className="input pl-3.5 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 font-mono text-base sm:text-sm min-h-[44px]"
+                    className="input pl-3.5 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 font-mono text-base sm:text-sm min-h-[44px] sm:min-h-[40px]"
                     disabled={isAnalyzing}
                   />
 
@@ -1030,7 +1030,7 @@ export default function App() {
                   <button
                     type="button"
                     disabled
-                    className="btn btn-primary flex-1 sm:flex-initial px-4 py-2.5 min-h-[44px] text-sm font-mono disabled:opacity-90"
+                    className="btn btn-primary flex-1 sm:flex-initial px-4 py-2.5 sm:py-2 min-h-[44px] sm:min-h-[40px] text-sm font-mono disabled:opacity-90"
                   >
                     <RefreshCw className="w-4 h-4 animate-spin" />
                     <span>Processing...</span>
@@ -1038,7 +1038,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleCancelAnalysis}
-                    className="btn px-3.5 py-2.5 min-h-[44px] border border-rose-200 dark:border-rose-900/70 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 text-xs"
+                    className="btn px-3.5 py-2.5 sm:py-2 min-h-[44px] sm:min-h-[40px] border border-rose-200 dark:border-rose-900/70 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 text-xs"
                     title="Stop analysis"
                   >
                     <Square className="w-3.5 h-3.5 fill-current" />
@@ -1049,7 +1049,7 @@ export default function App() {
                 <button
                   type="submit"
                   disabled={!currentUrl.trim()}
-                  className="btn btn-primary w-full sm:w-auto px-5 py-2.5 min-h-[44px] text-sm font-mono shrink-0"
+                  className="btn btn-primary w-full sm:w-auto px-4 py-2.5 sm:py-2 min-h-[44px] sm:min-h-[40px] text-sm font-mono shrink-0"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
                   <span>Generate .md</span>
