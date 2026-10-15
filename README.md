@@ -14,7 +14,7 @@
 
 - 🌐 **Live Web App**: Use directly at [yt-to-markdown.vercel.app](https://yt-to-markdown.vercel.app) on desktop, tablet, or phone.
 - 🔑 **Bring Your Own Key (BYOK)**: Free Gemini API key usage with sandboxed client-side session security.
-- 📱 **Mobile & Tablet Optimized**: Responsive touch layout, instant paste button, and table rendering on all viewports.
+- 📱 **Mobile & Tablet Optimized**: Responsive touch layout and table rendering on all viewports.
 - 🎯 **Strict Factual Grounding**: Direct multimodal video understanding via Gemini (`mimeType: video/*`), eliminating hallucinations.
 - 🛡️ **Resource Protection**: Automatically screens and rejects non-YouTube links and private/unavailable videos before making model calls.
 - ⏱️ **Duration-Adaptive Chunking**: Smart zero-skip segmentation tailored from short clips to multi-hour lectures.
@@ -27,7 +27,7 @@
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
-- [Node.js](https://nodejs.org/) (v18+)
+- [Node.js](https://nodejs.org/) (v20+)
 - [Google AI Studio API Key](https://aistudio.google.com/app/apikey)
 
 ### 2. Installation

@@ -23,6 +23,7 @@
     <!-- Favicon & Icons -->
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png" />
     <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192x192.png" />
@@ -75,6 +76,19 @@
     {
       "@context": "https://schema.org",
       "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://yt-to-markdown.vercel.app/#website",
+          "url": "https://yt-to-markdown.vercel.app/",
+          "name": "yt-to-markdown",
+          "alternateName": [
+            "YouTube to Markdown",
+            "YouTube Video Note Summarizer"
+          ],
+          "description": "Convert YouTube videos and lectures into structured Markdown notes with AI.",
+          "inLanguage": "en",
+          "publisher": { "@id": "https://yt-to-markdown.vercel.app/#webapp" }
+        },
         {
           "@type": "WebApplication",
           "@id": "https://yt-to-markdown.vercel.app/#webapp",
