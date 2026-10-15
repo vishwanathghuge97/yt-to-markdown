@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { User } from 'firebase/auth';
 import { Header } from './components/Header';
 import { DriveExportModal } from './components/DriveExportModal';
@@ -17,12 +17,15 @@ import {
   performHierarchicalReduce,
   generateMarkdownReport,
   formatTimestamp,
+  CHUNK_OVERLAP_SEC,
+  DEFAULT_CHUNK_DURATION_SEC,
 } from './services/pipelineEngine';
 import {
   generateFullNotesClientDirect,
   analyzeChunkClientDirect,
-  sanitizeErrorMessage,
 } from './services/clientGemini';
+import { sanitizeErrorMessage, isInvalidApiKeyError, isQuotaError } from './shared/gemini';
+import { extractYouTubeVideoId } from './shared/youtubeUrl';
 import { saveLocalCreation } from './services/creationStorage';
 import { initAuth } from './services/firebase';
 import {
@@ -35,8 +38,6 @@ import {
   ChevronDown,
   ChevronUp,
   Terminal,
-  ExternalLink,
-  Layers,
   Key,
   X,
   Square,
@@ -46,6 +47,14 @@ type AnalysisPhase = 'reading' | 'analyzing' | 'preparing';
 // Videos under 45 minutes can be analyzed in a single fast grounded pass
 // without fragmentation. Longer videos use adaptive timed windows.
 const SINGLE_PASS_MAX_DURATION_SEC = 45 * 60;
+// Internal request budgets: keep the proxy abort below the API's own 12s model
+// timeout so a slow server call falls back to multi-window analysis instead of
+// being misread as a user cancellation.
+const INFO_REQUEST_TIMEOUT_MS = 12000;
+const PROXY_REQUEST_TIMEOUT_MS = 14000;
+const CHUNK_RETRY_DELAY_MS = 1500;
+// Baseline duration used when YouTube refuses to report the real length.
+const FALLBACK_DURATION_SEC = 600;
 
 async function apiErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
@@ -83,6 +92,9 @@ export default function App() {
   const [activeApiKeyIndex, setActiveApiKeyIndex] = useState(0);
   const activeApiKeyIndexRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Increments per analysis run; lets a cancelled run's `finally` avoid
+  // clobbering a newer run's UI state (e.g. cancel → immediately view a note).
+  const analysisRunIdRef = useRef(0);
 
   const [isPersistedLocally, setIsPersistedLocally] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -158,12 +170,24 @@ export default function App() {
 
   // Timer while analyzing
   useEffect(() => {
-    let interval: any;
+    let interval: ReturnType<typeof setInterval> | undefined;
     if (isAnalyzing) {
       interval = setInterval(() => setElapsedSec((s) => s + 1), 1000);
     }
     return () => clearInterval(interval);
   }, [isAnalyzing]);
+
+  // Abort any in-flight analysis when the app unmounts.
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
+  // Stable modal handlers: modal effects depend on onClose, so inline arrows
+  // would reset their form state / refetch Drive data on every re-render.
+  const closeApiKeyModal = useCallback(() => setIsApiKeyModalOpen(false), []);
+  const closeDriveModal = useCallback(() => setIsDriveModalOpen(false), []);
 
   const addLog = (msg: string) => {
     const time = new Date().toLocaleTimeString();
@@ -218,24 +242,6 @@ export default function App() {
     return response as Response;
   };
 
-  // Helper to strictly validate and extract YouTube URL / video ID
-  const extractYouTubeVideoId = (input: string): string | null => {
-    if (!input) return null;
-    let trimmed = input.trim().replace(/^[<"'\s]+|[>"'\s]+$/g, '');
-    if (trimmed.includes('%3A') || trimmed.includes('%2F')) {
-      try {
-        trimmed = decodeURIComponent(trimmed);
-      } catch {}
-    }
-    if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
-      return trimmed;
-    }
-    const match = trimmed.match(
-      /(?:https?:\/\/)?(?:(?:www|m|music)\.)?(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/|e\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i
-    );
-    return match ? match[1] : null;
-  };
-
   const handleStartAnalysis = async (e: React.FormEvent) => {
     e.preventDefault();
     const rawInput = currentUrl.trim();
@@ -244,7 +250,7 @@ export default function App() {
     // Every visitor must provide their own Gemini API key.
     if (!customApiKey || !customApiKey.trim()) {
       setIsApiKeyModalOpen(true);
-      setInputError('A Gemini API key is required. Please click "Set API Key" or provide your free key below to generate markdown notes.');
+      setInputError('A Gemini API key is required. Please click "Set API Key" to add your free key, then generate markdown notes.');
       return;
     }
 
@@ -260,6 +266,7 @@ export default function App() {
 
     setInputError('');
     setIsAnalyzing(true);
+    const runId = ++analysisRunIdRef.current;
     const analysisController = new AbortController();
     abortControllerRef.current = analysisController;
     const analysisSignal = analysisController.signal;
@@ -283,7 +290,7 @@ export default function App() {
 
       try {
         const infoController = new AbortController();
-        const infoTimeout = setTimeout(() => infoController.abort(), 12000);
+        const infoTimeout = setTimeout(() => infoController.abort(), INFO_REQUEST_TIMEOUT_MS);
         const onUserAbort = () => infoController.abort();
         analysisSignal.addEventListener('abort', onUserAbort, { once: true });
         let infoRes: Response;
@@ -300,10 +307,15 @@ export default function App() {
           if (info.durationSec && info.durationSec > 0) durationSec = info.durationSec;
           if (info.description) description = info.description;
           if (Array.isArray(info.creatorChapters)) creatorChapters = info.creatorChapters;
+          if (info.durationEstimated) {
+            addLog('Notice: YouTube did not report the video length; using an estimated duration.');
+          }
         } else {
           throw new Error(await apiErrorMessage(infoRes, 'Could not inspect the YouTube video'));
         }
       } catch (backendErr) {
+        // A user cancellation must not fall through to the oEmbed fallback path.
+        if (analysisSignal.aborted) throw backendErr;
         addLog('Server inspection notice: Trying direct YouTube oEmbed fallback...');
         // Resilient fallback: Query YouTube official oEmbed directly from browser
         try {
@@ -325,7 +337,7 @@ export default function App() {
 
       if (!durationSec || durationSec <= 0) {
         addLog('Notice: Video duration probe was blocked or undetermined. Pacing with standard baseline.');
-        durationSec = 600;
+        durationSec = FALLBACK_DURATION_SEC;
       }
 
       addLog(`Video: "${videoTitle}" by ${authorName}`);
@@ -396,13 +408,13 @@ export default function App() {
               addLog(`✓ Direct Gemini analysis completed successfully (${directRes.modelUsed})!`);
             }
           } catch (directErr: any) {
-            if (analysisSignal.aborted || directErr?.name === 'AbortError') {
+            if (analysisSignal.aborted) {
               throw directErr;
             }
             console.warn('Direct client generation notice:', sanitizeErrorMessage(directErr));
             addLog(`Direct note generation noticed: ${sanitizeErrorMessage(directErr)}`);
-            // Check if key rotation is needed
-            if (/API_KEY_INVALID|invalid.*api.*key|quota|rate limit/i.test(directErr?.message || '') && customApiKeys.length > 1) {
+            // Rotate to a backup key when the active key is invalid or exhausted.
+            if ((isInvalidApiKeyError(directErr) || isQuotaError(directErr)) && customApiKeys.length > 1) {
               const nextIndex = (activeApiKeyIndexRef.current + 1) % customApiKeys.length;
               activeApiKeyIndexRef.current = nextIndex;
               setActiveApiKeyIndex(nextIndex);
@@ -414,7 +426,7 @@ export default function App() {
         // Priority 2: Fallback to proxy route if direct client generation did not produce a report
         if (!generatedReport) {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 14000);
+          const timeoutId = setTimeout(() => controller.abort(), PROXY_REQUEST_TIMEOUT_MS);
 
           let fastRes: Response | null = null;
           try {
@@ -501,8 +513,8 @@ export default function App() {
               generatedReport = {
                 metadata: currentMetadata,
                 config: {
-                  chunkDurationSec: 2400,
-                  overlapSec: 20,
+                  chunkDurationSec: DEFAULT_CHUNK_DURATION_SEC,
+                  overlapSec: CHUNK_OVERLAP_SEC,
                   mediaResolution: 'high',
                   totalChunks: planned.length,
                   totalTokens: 300000,
@@ -539,12 +551,14 @@ export default function App() {
           }
         }
       } catch (fastErr: any) {
-        if (fastErr?.stopFallback || analysisSignal.aborted || fastErr?.name === 'AbortError') throw fastErr;
+        // A user cancellation (or a hard 4xx: missing/short body, bad key) must
+        // stop the pipeline; a timeout/network error falls through to windows.
+        if (fastErr?.stopFallback || analysisSignal.aborted) throw fastErr;
         addLog(`Single-pass notice: ${sanitizeErrorMessage(fastErr)}. Automatically proceeding with multi-segment window analysis...`);
       }
 
-      // If fast pass succeeded, set report immediately!
-      if (generatedReport) {
+      // If fast pass succeeded, set report immediately (unless cancelled meanwhile).
+      if (generatedReport && !analysisSignal.aborted) {
         setReport(generatedReport);
         setProgressPercent(100);
         setStatusMessage('Markdown generation complete!');
@@ -560,7 +574,6 @@ export default function App() {
       const chunkResults: ChunkAnalysisResult[] = [];
       let cumulativeTranscript: any[] = [];
       let cumulativeVisuals: any[] = [];
-      const roadmapTitles: { [idx: number]: string } = {};
 
       // 4. Process each segment sequentially with real-time feedback
       for (let i = 0; i < planned.length; i++) {
@@ -577,7 +590,6 @@ export default function App() {
 
         const timeSpan = `${formatTimestamp(chunk.nominalStartSec)} - ${formatTimestamp(chunk.nominalEndSec)}`;
         const segTitle = `Part ${i + 1}`;
-        roadmapTitles[i] = segTitle;
 
         const pct = Math.round(20 + ((i) / planned.length) * 65);
         setProgressPercent(pct);
@@ -586,12 +598,13 @@ export default function App() {
 
         let chunkSuccess = false;
         let lastChunkErr: any = null;
-        const activeKey = customApiKeys[activeApiKeyIndexRef.current] || customApiKey || '';
 
-        // Try chunk analysis up to 3 times with timeout and key rotation
+        // Try chunk analysis up to 3 times with timeout and key rotation.
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
             let analysisResult: ChunkAnalysisResult | null = null;
+            // Recompute per attempt: requestWithKeyRotation may have switched keys.
+            const activeKey = customApiKeys[activeApiKeyIndexRef.current] || customApiKey || '';
 
             // Direct client execution (no Vercel serverless timeouts)
             if (activeKey) {
@@ -606,7 +619,6 @@ export default function App() {
                   nominalEndSec: chunk.nominalEndSec,
                   topicContextHint: segTitle,
                   videoDescription: description,
-                  totalDurationSec: durationSec,
                   abortSignal: analysisSignal,
                 });
                 analysisResult = {
@@ -626,7 +638,7 @@ export default function App() {
 
             if (!analysisResult) {
               const chunkController = new AbortController();
-              const chunkTimeout = setTimeout(() => chunkController.abort(), 14000);
+              const chunkTimeout = setTimeout(() => chunkController.abort(), PROXY_REQUEST_TIMEOUT_MS);
 
               let res: Response;
               try {
@@ -687,7 +699,7 @@ export default function App() {
                 cumulativeTranscript,
                 analysisResult.transcript,
                 chunk.nominalStartSec,
-                20
+                CHUNK_OVERLAP_SEC
               );
               cumulativeTranscript = dedupe.merged;
             } else {
@@ -705,19 +717,19 @@ export default function App() {
             break;
           } catch (err: any) {
             // Stop immediately on user cancellation instead of retrying.
-            if (analysisSignal.aborted || err?.name === 'AbortError') {
+            if (analysisSignal.aborted) {
               throw err;
             }
             lastChunkErr = err;
             if (attempt < 2) {
-              addLog(`Segment ${i + 1} attempt ${attempt + 1} notice: ${err.message}. Retrying in 1.5s...`);
-              await new Promise((r) => setTimeout(r, 1500));
+              addLog(`Segment ${i + 1} attempt ${attempt + 1} notice: ${sanitizeErrorMessage(err)}. Retrying in ${CHUNK_RETRY_DELAY_MS / 1000}s...`);
+              await new Promise((r) => setTimeout(r, CHUNK_RETRY_DELAY_MS));
             }
           }
         }
 
         if (!chunkSuccess) {
-          addLog(`⚠️ Segment ${i + 1} notice: ${lastChunkErr?.message || 'High demand'}. Generating grounded summary fallback for ${timeSpan}.`);
+          addLog(`⚠️ Segment ${i + 1} notice: ${lastChunkErr ? sanitizeErrorMessage(lastChunkErr) : 'High demand'}. Generating grounded summary fallback for ${timeSpan}.`);
           const fallbackResult: ChunkAnalysisResult = {
             chunkIndex: i,
             startSec: chunk.nominalStartSec,
@@ -745,7 +757,7 @@ export default function App() {
               cumulativeTranscript,
               fallbackResult.transcript,
               chunk.nominalStartSec,
-              20
+              CHUNK_OVERLAP_SEC
             );
             cumulativeTranscript = fallbackDedupe.merged;
           } else {
@@ -766,7 +778,7 @@ export default function App() {
       setStatusMessage('Synthesizing executive summary and compiling Markdown...');
       addLog('Compiling chapters, takeaways, and formatting clean Markdown document...');
 
-      const reduceOutput = performHierarchicalReduce(chunkResults, currentMetadata, roadmapTitles);
+      const reduceOutput = performHierarchicalReduce(chunkResults, currentMetadata);
 
       // All evidence was already analyzed in the offset windows. A final
       // Gemini call would cost quota and add another failure point without
@@ -777,8 +789,8 @@ export default function App() {
       const fullReport: FullAnalysisReport = {
         metadata: currentMetadata,
         config: {
-          chunkDurationSec: 2400,
-          overlapSec: 20,
+          chunkDurationSec: DEFAULT_CHUNK_DURATION_SEC,
+          overlapSec: CHUNK_OVERLAP_SEC,
           mediaResolution: 'high',
           totalChunks: chunkResults.length,
           totalTokens: chunkResults.length * 500000,
@@ -812,7 +824,7 @@ export default function App() {
       setStatusMessage('Markdown generation complete!');
       addLog(`Markdown document created successfully (${fullReport.markdownContent.split('\n').length} lines).`);
     } catch (err: any) {
-      if (err?.name === 'AbortError' || analysisSignal.aborted) {
+      if (analysisSignal.aborted) {
         addLog('Analysis cancelled.');
         setStatusMessage('');
         return;
@@ -823,8 +835,12 @@ export default function App() {
       setStatusMessage('');
       addLog(`Error: ${cleanMsg}`);
     } finally {
-      setIsAnalyzing(false);
-      setActiveChunkIndex(-1);
+      // Only the owning run may reset shared UI state; a cancelled run must not
+      // clobber a newer run (or a history note opened right after cancelling).
+      if (analysisRunIdRef.current === runId) {
+        setIsAnalyzing(false);
+        setActiveChunkIndex(-1);
+      }
       // Only clear the ref when it still belongs to this analysis run.
       if (abortControllerRef.current === analysisController) {
         abortControllerRef.current = null;
@@ -833,6 +849,12 @@ export default function App() {
   };
 
   const handleSelectCreation = (title: string, markdownContent: string) => {
+    // Viewing a saved note during analysis would hide the progress UI and let
+    // the running pipeline overwrite it; stop the analysis first.
+    if (isAnalyzing) {
+      handleCancelAnalysis();
+    }
+
     const loadedReport: FullAnalysisReport = {
       metadata: {
         id: `history-${Date.now()}`,
@@ -843,8 +865,8 @@ export default function App() {
         publishedDate: new Date().toISOString().split('T')[0],
       },
       config: {
-        chunkDurationSec: 2400,
-        overlapSec: 20,
+        chunkDurationSec: DEFAULT_CHUNK_DURATION_SEC,
+        overlapSec: CHUNK_OVERLAP_SEC,
         mediaResolution: 'high',
         totalChunks: 1,
         totalTokens: 0,
@@ -885,16 +907,17 @@ export default function App() {
         user={user}
         onAuthChange={setUser}
         onOpenDriveModal={() => setIsDriveModalOpen(true)}
+        hasReport={!!(report && report.markdownContent)}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
-        apiKey={customApiKeys.length ? String(customApiKeys.length) : ''}
+        apiKeyCount={customApiKeys.length}
         onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
       />
 
       {/* API Key Modal */}
       <ApiKeyModal
         isOpen={isApiKeyModalOpen}
-        onClose={() => setIsApiKeyModalOpen(false)}
+        onClose={closeApiKeyModal}
         apiKey={customApiKeys.join('\n')}
         onSaveKey={handleSaveApiKey}
         initialPersist={isPersistedLocally}
@@ -1143,7 +1166,6 @@ export default function App() {
         {report ? (
           <MarkdownOutputView
             videoTitle={report.metadata.title}
-            channelTitle={report.metadata.channel}
             markdownContent={report.markdownContent}
             onOpenDriveModal={() => setIsDriveModalOpen(true)}
           />
@@ -1176,7 +1198,7 @@ export default function App() {
       {report && (
         <DriveExportModal
           isOpen={isDriveModalOpen}
-          onClose={() => setIsDriveModalOpen(false)}
+          onClose={closeDriveModal}
           user={user}
           onAuthChange={setUser}
           fileName={`${report.metadata.title.slice(0, 40)}-summary`}

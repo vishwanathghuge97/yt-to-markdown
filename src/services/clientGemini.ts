@@ -1,119 +1,19 @@
 import { GoogleGenAI } from '@google/genai';
-import { formatTimestamp } from './pipelineEngine';
 import { FullAnalysisReport, ChapterCluster, TranscriptEntry, VisualObservation, VideoMetadata } from '../types/pipeline';
+import { formatTimestamp } from '../shared/time';
+import { extractYouTubeVideoId, getCanonicalYouTubeUrl } from '../shared/youtubeUrl';
+import { cleanAndParseJson } from '../shared/jsonRepair';
+import {
+  GEMINI_MODELS,
+  isInvalidApiKeyError,
+  isQuotaError,
+  sanitizeErrorMessage,
+} from '../shared/gemini';
+import { CHUNK_OVERLAP_SEC, DEFAULT_CHUNK_DURATION_SEC } from './pipelineEngine';
 
-// Supported fast models for free & standard Gemini API keys
-const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
-
-/**
- * Strict YouTube Video ID extractor & validator to prevent SSRF or injection attacks
- */
-export function extractYouTubeVideoId(input: string): string | null {
-  if (!input) return null;
-  let trimmed = input.trim();
-  trimmed = trimmed.replace(/^[<"'\s]+|[>"'\s]+$/g, '');
-
-  if (trimmed.includes('%3A') || trimmed.includes('%2F')) {
-    try {
-      trimmed = decodeURIComponent(trimmed);
-    } catch {}
-  }
-
-  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
-    return trimmed;
-  }
-
-  const match = trimmed.match(
-    /(?:https?:\/\/)?(?:(?:www|m|music)\.)?(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/|e\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i
-  );
-  return match ? match[1] : null;
-}
-
-export function getCanonicalYouTubeUrl(input: string): string {
-  const id = extractYouTubeVideoId(input);
-  return id ? `https://www.youtube.com/watch?v=${id}` : input.trim();
-}
-
-/**
- * Redacts any accidental API keys from error messages or logs to prevent credential leakage
- */
-export function sanitizeErrorMessage(err: any): string {
-  if (!err) return 'An unknown error occurred during generation.';
-  let msg = typeof err === 'string' ? err : err.message || String(err);
-  // Redact any Google API key pattern (AIza...)
-  msg = msg.replace(/AIza[0-9A-Za-z-_]{35}/g, '[REDACTED_API_KEY]');
-  if (/API_KEY_INVALID|invalid.*api.*key|permission denied/i.test(msg)) {
-    return 'Your Gemini API key was rejected. Please check that your key is valid and has not expired.';
-  }
-  if (/RESOURCE_EXHAUSTED|rate limit|quota/i.test(msg)) {
-    return 'Gemini API rate limit or quota exceeded. Please wait a minute or rotate your free API key.';
-  }
-  if (/AbortError|timed out/i.test(msg)) {
-    return 'The request timed out. Please check your internet connection and try again.';
-  }
-  return msg;
-}
-
-/**
- * Safely extracts and cleans JSON from Gemini output
- */
-export function cleanAndParseJson<T = any>(rawText: string): T {
-  if (!rawText) throw new Error('Empty response received from Gemini.');
-  let text = rawText.trim();
-
-  // Strip code blocks if present
-  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (codeBlockMatch && codeBlockMatch[1]) {
-    text = codeBlockMatch[1].trim();
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {}
-
-  // Find the outermost JSON object or array
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-  const firstBracket = text.indexOf('[');
-  const lastBracket = text.lastIndexOf(']');
-  const isObjectFirst = firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket);
-
-  const candidate = isObjectFirst && lastBrace > firstBrace
-    ? text.slice(firstBrace, lastBrace + 1)
-    : firstBracket !== -1 && lastBracket > firstBracket
-      ? text.slice(firstBracket, lastBracket + 1)
-      : text;
-
-  try {
-    return JSON.parse(candidate);
-  } catch {}
-
-  // Repair common LLM formatting anomalies (trailing commas, control characters)
-  let repaired = candidate
-    .replace(/,\s*([}\]])/g, '$1')
-    .replace(/[\u0000-\u001F\u007F-\u009F]/g, (char) => (char === '\n' || char === '\r' || char === '\t' ? char : ''));
-
-  try {
-    return JSON.parse(repaired);
-  } catch {}
-
-  // Auto-close truncated JSON if the model output ended abruptly
-  try {
-    const openBraces = (repaired.match(/\{/g) || []).length;
-    const closeBraces = (repaired.match(/\}/g) || []).length;
-    const openBrackets = (repaired.match(/\[/g) || []).length;
-    const closeBrackets = (repaired.match(/\]/g) || []).length;
-    if (openBrackets > closeBrackets) {
-      repaired += ']'.repeat(openBrackets - closeBrackets);
-    }
-    if (openBraces > closeBraces) {
-      repaired += '}'.repeat(openBraces - closeBraces);
-    }
-    return JSON.parse(repaired);
-  } catch {}
-
-  throw new Error('Could not parse structured JSON from the model response.');
-}
+// Re-exported so existing importers of this module keep working; the
+// implementations live in src/shared to keep client and server in lockstep.
+export { extractYouTubeVideoId, getCanonicalYouTubeUrl, sanitizeErrorMessage };
 
 /**
  * Client-Side Direct Gemini Single-Pass Generator.
@@ -249,6 +149,7 @@ Return STRICT JSON:
   const ai = new GoogleGenAI({ apiKey: cleanKey });
 
   let lastError: any = null;
+  let quotaError: any = null;
 
   for (const model of GEMINI_MODELS) {
     try {
@@ -357,8 +258,8 @@ Return STRICT JSON:
       const report: FullAnalysisReport = {
         metadata: currentMetadata,
         config: {
-          chunkDurationSec: 2400,
-          overlapSec: 20,
+          chunkDurationSec: DEFAULT_CHUNK_DURATION_SEC,
+          overlapSec: CHUNK_OVERLAP_SEC,
           mediaResolution: 'high',
           totalChunks: 1,
           totalTokens: 300000,
@@ -381,19 +282,33 @@ Return STRICT JSON:
       return { report, modelUsed: model };
     } catch (err: any) {
       // Respect user cancellation: never rotate models or mask the abort.
-      if (abortSignal?.aborted || err?.name === 'AbortError') {
+      if (abortSignal?.aborted) {
         throw err;
       }
       console.warn(`Direct model ${model} attempt failed:`, sanitizeErrorMessage(err));
       lastError = err;
-      // If error is 401/invalid key, do not retry other models as key is invalid
-      if (/API_KEY_INVALID|invalid.*api.*key|permission denied/i.test(err?.message || '')) {
+      if (isQuotaError(err) && !quotaError) quotaError = err;
+      // An invalid key fails identically on every model; report it immediately.
+      if (isInvalidApiKeyError(err)) {
         throw new Error(sanitizeErrorMessage(err));
       }
     }
   }
 
-  throw new Error(sanitizeErrorMessage(lastError));
+  throw new Error(sanitizeErrorMessage(quotaError || lastError));
+}
+
+/** Result shape of a direct (browser-to-Gemini) chunk analysis. */
+export interface DirectChunkAnalysis {
+  chunkIndex: number;
+  nominalStartSec: number;
+  nominalEndSec: number;
+  summary: string;
+  keyTakeaways: string[];
+  transcript: any[];
+  visualObservations: any[];
+  entities: any[];
+  modelUsed: string;
 }
 
 /**
@@ -409,9 +324,8 @@ export async function analyzeChunkClientDirect(params: {
   nominalEndSec: number;
   topicContextHint?: string;
   videoDescription?: string;
-  totalDurationSec?: number;
   abortSignal?: AbortSignal;
-}): Promise<any> {
+}): Promise<DirectChunkAnalysis> {
   const {
     apiKey,
     videoUrl,
@@ -474,6 +388,7 @@ Return STRICT JSON:
 
   const ai = new GoogleGenAI({ apiKey: cleanKey });
   let lastError: any = null;
+  let quotaError: any = null;
 
   for (const model of GEMINI_MODELS) {
     try {
@@ -519,16 +434,17 @@ Return STRICT JSON:
       };
     } catch (err: any) {
       // Respect user cancellation: never rotate models or mask the abort.
-      if (abortSignal?.aborted || err?.name === 'AbortError') {
+      if (abortSignal?.aborted) {
         throw err;
       }
       console.warn(`Direct chunk analysis ${model} attempt failed:`, sanitizeErrorMessage(err));
       lastError = err;
-      if (/API_KEY_INVALID|invalid.*api.*key|permission denied/i.test(err?.message || '')) {
+      if (isQuotaError(err) && !quotaError) quotaError = err;
+      if (isInvalidApiKeyError(err)) {
         throw new Error(sanitizeErrorMessage(err));
       }
     }
   }
 
-  throw new Error(sanitizeErrorMessage(lastError));
+  throw new Error(sanitizeErrorMessage(quotaError || lastError));
 }

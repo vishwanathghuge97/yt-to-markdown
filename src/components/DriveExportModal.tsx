@@ -43,6 +43,9 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      // Fresh open: clear stale success/error state from a previous session.
+      setExportResult(null);
+      setErrorMessage(null);
       if (user) {
         loadRecentFiles();
       }
@@ -63,22 +66,19 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
     }
   };
 
-  const handleSignIn = async () => {
-    try {
-      setErrorMessage(null);
-      const res = await googleSignIn();
-      if (res) {
-        onAuthChange(res.user);
-      }
-    } catch (err: any) {
-      setErrorMessage(formatAuthError(err));
-    }
-  };
-
   const handleConfirmExport = async () => {
+    // Continuing straight into the export after sign-in avoids making the user
+    // click "Save to Drive" a second time.
     if (!user) {
-      await handleSignIn();
-      return;
+      try {
+        setErrorMessage(null);
+        const res = await googleSignIn();
+        if (!res) return;
+        onAuthChange(res.user);
+      } catch (err: any) {
+        setErrorMessage(formatAuthError(err));
+        return;
+      }
     }
 
     try {
@@ -103,7 +103,12 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 dark:bg-black/70 backdrop-blur-xs">
-      <div className="bg-white dark:bg-zinc-900 rounded-xl sm:rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto border border-slate-200 dark:border-zinc-800 shadow-2xl flex flex-col transition-colors">
+      <div
+        className="bg-white dark:bg-zinc-900 rounded-xl sm:rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto border border-slate-200 dark:border-zinc-800 shadow-2xl flex flex-col transition-colors"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Save to Google Drive"
+      >
         {/* Header */}
         <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 dark:border-zinc-800 flex items-center justify-between">
           <div className="flex items-center space-x-2.5">

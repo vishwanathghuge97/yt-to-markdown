@@ -9,8 +9,11 @@ interface HeaderProps {
   onOpenDriveModal?: () => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
-  apiKey: string;
+  /** Number of configured Gemini API keys (0 = none yet). */
+  apiKeyCount: number;
   onOpenApiKeyModal: () => void;
+  /** Enables the Drive export button; false while no note is loaded. */
+  hasReport?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -19,8 +22,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenDriveModal,
   darkMode,
   onToggleDarkMode,
-  apiKey,
+  apiKeyCount,
   onOpenApiKeyModal,
+  hasReport = false,
 }) => {
   const [isSigningIn, setIsSigningIn] = React.useState(false);
   const [authError, setAuthError] = React.useState<string | null>(null);
@@ -43,8 +47,13 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const handleSignOut = async () => {
-    await logout();
-    onAuthChange(null);
+    try {
+      await logout();
+      onAuthChange(null);
+    } catch (err) {
+      console.error('Failed to sign out:', err);
+      setAuthError('Could not sign out. Please check your connection and try again.');
+    }
   };
 
   return (
@@ -71,7 +80,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenApiKeyModal}
             className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 min-h-[38px] rounded-md text-xs font-mono transition border touch-manipulation active:scale-95 ${
-              apiKey
+              apiKeyCount > 0
                 ? 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
                 : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60'
             }`}
@@ -80,11 +89,13 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Key className="w-3.5 h-3.5 shrink-0" />
             <span className="hidden md:inline">
-              {apiKey ? `${apiKey} API ${apiKey === '1' ? 'Key' : 'Keys'}` : 'Set API Key'}
+              {apiKeyCount > 0
+                ? `${apiKeyCount} API ${apiKeyCount === 1 ? 'Key' : 'Keys'}`
+                : 'Set API Key'}
             </span>
             <span
               className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                apiKey ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'
+                apiKeyCount > 0 ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'
               }`}
             />
           </button>
@@ -109,8 +120,14 @@ export const Header: React.FC<HeaderProps> = ({
               {onOpenDriveModal && (
                 <button
                   onClick={onOpenDriveModal}
-                  className="px-1.5 py-1 text-[11px] font-mono rounded bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-1 transition touch-manipulation"
-                  title="Google Drive export destination"
+                  disabled={!hasReport}
+                  className="px-1.5 py-1 text-[11px] font-mono rounded bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-1 transition touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    hasReport
+                      ? 'Google Drive export destination'
+                      : 'Generate a note first to enable Drive export'
+                  }
+                  aria-label="Google Drive export destination"
                 >
                   <HardDrive className="w-3 h-3 text-zinc-600 dark:text-zinc-400" />
                   <span className="hidden sm:inline">Drive</span>

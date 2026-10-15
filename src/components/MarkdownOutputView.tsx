@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
-import { Download, Copy, Check, HardDrive, FileText, Code } from 'lucide-react';
+import { Download, Copy, Check, HardDrive } from 'lucide-react';
+import { slugifyHeading } from '../shared/markdown';
+import { copyTextToClipboard } from '../utils/clipboard';
+import { downloadTextFile } from '../utils/download';
 
 interface MarkdownOutputViewProps {
   videoTitle: string;
-  channelTitle: string;
   markdownContent: string;
   onOpenDriveModal: () => void;
 }
 
 export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
   videoTitle,
-  channelTitle,
   markdownContent,
   onOpenDriveModal,
 }) => {
@@ -18,36 +19,12 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
 
   const handleCopy = async () => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(markdownContent);
-      } else {
-        const textarea = document.createElement('textarea');
-        textarea.value = markdownContent;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-      }
+    const ok = await copyTextToClipboard(markdownContent);
+    if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      try {
-        const textarea = document.createElement('textarea');
-        textarea.value = markdownContent;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } catch (err) {
-        console.error('Clipboard copy failed:', err);
-      }
+    } else {
+      console.error('Clipboard copy failed.');
     }
   };
 
@@ -61,19 +38,11 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
   };
 
   const handleDownload = () => {
-    const filename = cleanFileName();
-    const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadTextFile(cleanFileName(), markdownContent);
   };
 
-  const wordCount = markdownContent.trim().split(/\s+/).length;
+  const trimmedContent = markdownContent.trim();
+  const wordCount = trimmedContent ? trimmedContent.split(/\s+/).length : 0;
   const lineCount = markdownContent.split('\n').length;
   const sizeKb = (new Blob([markdownContent]).size / 1024).toFixed(1);
 
@@ -232,23 +201,12 @@ const CodeBlockItem: React.FC<CodeBlockItemProps> = ({ code, language }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopyCode = async () => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(code);
-      } else {
-        const textarea = document.createElement('textarea');
-        textarea.value = code;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-      }
+    const ok = await copyTextToClipboard(code);
+    if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy code snippet:', err);
+    } else {
+      console.error('Failed to copy code snippet.');
     }
   };
 
@@ -290,9 +248,42 @@ function renderMarkdown(content: string) {
   let inCodeBlock = false;
   let codeBlockLines: string[] = [];
   let currentLanguage = '';
+  const slugCounts = new Map<string, number>();
+
+  // Heading id matching the "#anchor" slugs used by the generated table of
+  // contents. Duplicate headings get a "-2", "-3", ... suffix (like GitHub).
+  const headingId = (text: string) => {
+    const plain = text
+      .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+      .replace(/[*`[\]]/g, '')
+      .trim();
+    const base = slugifyHeading(plain) || 'section';
+    const seen = slugCounts.get(base) || 0;
+    slugCounts.set(base, seen + 1);
+    return seen === 0 ? base : `${base}-${seen + 1}`;
+  };
+
+  // Consecutive list items are grouped into a single <ul>/<ol> so the preview
+  // renders valid, properly nested markup.
+  let pendingList: { ordered: boolean; items: React.ReactNode[] } | null = null;
+  const flushList = () => {
+    if (!pendingList) return;
+    const Tag = pendingList.ordered ? 'ol' : 'ul';
+    elements.push(
+      <Tag
+        key={`list-${elements.length}`}
+        className={pendingList.ordered ? 'list-decimal ml-5 my-2 space-y-0.5' : 'list-disc ml-5 my-2 space-y-0.5'}
+      >
+        {pendingList.items}
+      </Tag>
+    );
+    pendingList = null;
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const isListLine = /^\d+\.\s+/.test(line) || /^[-*]\s+/.test(line);
+    if (!isListLine) flushList();
 
     if (/^```+/.test(line.trim())) {
       if (inCodeBlock) {
@@ -371,43 +362,57 @@ function renderMarkdown(content: string) {
     }
 
     if (line.startsWith('# ')) {
+      const text = line.replace('# ', '');
       elements.push(
         <h1
           key={`h1-${i}`}
-          className="text-xl font-bold text-zinc-900 dark:text-zinc-100 pb-2 border-b border-zinc-200 dark:border-zinc-800 mt-5 mb-3"
+          id={headingId(text)}
+          className="text-xl font-bold text-zinc-900 dark:text-zinc-100 pb-2 border-b border-zinc-200 dark:border-zinc-800 mt-5 mb-3 scroll-mt-4"
         >
-          {formatInlineMarkdown(line.replace('# ', ''))}
+          {formatInlineMarkdown(text)}
         </h1>
       );
     } else if (line.startsWith('## ')) {
+      const text = line.replace('## ', '');
       elements.push(
         <h2
           key={`h2-${i}`}
-          className="text-base font-semibold text-zinc-900 dark:text-zinc-100 pb-1 border-b border-zinc-100 dark:border-zinc-800/60 mt-6 mb-2"
+          id={headingId(text)}
+          className="text-base font-semibold text-zinc-900 dark:text-zinc-100 pb-1 border-b border-zinc-100 dark:border-zinc-800/60 mt-6 mb-2 scroll-mt-4"
         >
-          {formatInlineMarkdown(line.replace('## ', ''))}
+          {formatInlineMarkdown(text)}
         </h2>
       );
     } else if (line.startsWith('### ')) {
+      const text = line.replace('### ', '');
       elements.push(
         <h3
           key={`h3-${i}`}
-          className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mt-4 mb-1"
+          id={headingId(text)}
+          className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mt-4 mb-1 scroll-mt-4"
         >
-          {formatInlineMarkdown(line.replace('### ', ''))}
+          {formatInlineMarkdown(text)}
         </h3>
       );
     } else if (/^\d+\.\s+/.test(line)) {
       const text = line.replace(/^\d+\.\s+/, '');
-      elements.push(
-        <li key={`ol-${i}`} className="ml-5 list-decimal text-zinc-700 dark:text-zinc-300 my-1 text-xs sm:text-sm">
+      if (!pendingList || !pendingList.ordered) {
+        flushList();
+        pendingList = { ordered: true, items: [] };
+      }
+      pendingList.items.push(
+        <li key={`ol-${i}`} className="text-zinc-700 dark:text-zinc-300 text-xs sm:text-sm">
           {formatInlineMarkdown(text)}
         </li>
       );
     } else if (/^[-*]\s+/.test(line)) {
       const text = line.replace(/^[-*]\s+/, '');
-      elements.push(
-        <li key={`ul-${i}`} className="ml-5 list-disc text-zinc-700 dark:text-zinc-300 my-1 text-xs sm:text-sm">
+      if (!pendingList || pendingList.ordered) {
+        flushList();
+        pendingList = { ordered: false, items: [] };
+      }
+      pendingList.items.push(
+        <li key={`ul-${i}`} className="text-zinc-700 dark:text-zinc-300 text-xs sm:text-sm">
           {formatInlineMarkdown(text)}
         </li>
       );
@@ -430,6 +435,8 @@ function renderMarkdown(content: string) {
       );
     }
   }
+
+  flushList();
 
   if (inCodeBlock && codeBlockLines.length > 0) {
     elements.push(

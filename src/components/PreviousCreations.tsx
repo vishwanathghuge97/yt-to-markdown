@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { User } from 'firebase/auth';
 import {
   DriveUploadResult,
@@ -6,8 +6,9 @@ import {
   fetchDriveFileContent,
   deleteDriveFile,
   saveMarkdownToDrive,
+  isAuthRequiredError,
 } from '../services/googleDrive';
-import { googleSignIn, formatAuthError } from '../services/firebase';
+import { googleSignIn, formatAuthError, auth } from '../services/firebase';
 import {
   getLocalCreations,
   deleteLocalCreation,
@@ -20,7 +21,11 @@ import {
   pruneSyncedCreations,
   StorageStats,
   getAllCreationsHydrated,
+  isStubbedContent,
+  normalizeTitleForMatch,
 } from '../services/creationStorage';
+import { copyTextToClipboard } from '../utils/clipboard';
+import { downloadTextFile } from '../utils/download';
 import {
   Clock,
   Search,
@@ -64,6 +69,34 @@ interface PreviousCreationsProps {
   lastGeneratedTime?: number;
 }
 
+/**
+ * Resolves the full markdown for a history item: in-memory/localStorage copy
+ * first, then IndexedDB, and finally Google Drive when only a stub exists.
+ * Returns null when no source has the full content.
+ */
+async function resolveFullContent(item: UnifiedCreation): Promise<string | null> {
+  if (item.markdownContent && !isStubbedContent(item.markdownContent)) {
+    return item.markdownContent;
+  }
+
+  try {
+    const local = await getFullCreationContent(item.id);
+    if (local) return local;
+  } catch (err) {
+    console.warn('Local content lookup failed:', err);
+  }
+
+  if (item.driveFileId) {
+    try {
+      return await fetchDriveFileContent(item.driveFileId);
+    } catch (err) {
+      console.warn('Drive content fetch failed:', err);
+    }
+  }
+
+  return null;
+}
+
 export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   user,
   onAuthChange,
@@ -74,7 +107,6 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   const [driveFiles, setDriveFiles] = useState<DriveUploadResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [needsAuth, setNeedsAuth] = useState(false);
   const [needsReauth, setNeedsReauth] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'drive' | 'local'>('all');
@@ -85,7 +117,26 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [authErrorMessage, setAuthErrorMessage] = useState<string | null>(null);
   const [storageStats, setStorageStats] = useState<StorageStats>(getStorageStats);
-  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Monotonic id for Drive loads so an older response never overwrites a newer one.
+  const driveLoadIdRef = useRef(0);
+  // Single shared notice timer: a new notice replaces (not races) the old one.
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showNotice = useCallback((message: string, durationMs = 3000) => {
+    setStatusNotice(message);
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = setTimeout(() => {
+      setStatusNotice(null);
+      noticeTimerRef.current = null;
+    }, durationMs);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    };
+  }, []);
 
   // Reload local creations on mount and whenever lastGeneratedTime updates
   const reloadLocalCreations = useCallback(() => {
@@ -108,15 +159,16 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
     };
   }, [reloadLocalCreations, lastGeneratedTime]);
 
-  // Load Google Drive files if user is signed in
+  // Load Google Drive files. Reads the live Firebase session (not the `user`
+  // prop) so a sync started right after sign-in sees the fresh currentUser.
   const loadDriveFiles = useCallback(
     async (isManual = false) => {
-      if (!user) {
+      if (!auth.currentUser) {
         setDriveFiles([]);
-        setNeedsAuth(true);
         return;
       }
 
+      const requestId = ++driveLoadIdRef.current;
       try {
         setIsLoading(true);
         setIsSyncing(true);
@@ -126,35 +178,32 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
         }
 
         const list = await listRecentDriveExports();
+        if (driveLoadIdRef.current !== requestId) return; // superseded by a newer load
         setDriveFiles(list);
-        setNeedsAuth(false);
         setNeedsReauth(false);
 
         if (isManual) {
-          setStatusNotice(
-            `✓ Synced (${list.length} Drive ${list.length === 1 ? 'file' : 'files'})`
-          );
-          setTimeout(() => setStatusNotice(null), 3000);
+          showNotice(`✓ Synced (${list.length} Drive ${list.length === 1 ? 'file' : 'files'})`);
         }
       } catch (err: any) {
-        if (err?.code === 'AUTH_REQUIRED') {
-          setNeedsAuth(true);
+        if (driveLoadIdRef.current !== requestId) return;
+        if (isAuthRequiredError(err)) {
           // The Firebase session is still active but the Google access token
           // expired; surface an explicit reconnect action (needs a user click).
           setNeedsReauth(true);
           setStatusNotice('Google Drive access expired. Use "Reconnect Drive" to continue syncing.');
         } else {
-          const formatted = formatAuthError(err);
-          setAuthErrorMessage(formatted);
-          setStatusNotice('Could not reach Google Drive.');
-          setTimeout(() => setStatusNotice(null), 4000);
+          setAuthErrorMessage(formatAuthError(err));
+          showNotice('Could not reach Google Drive.', 4000);
         }
       } finally {
-        setIsLoading(false);
-        setIsSyncing(false);
+        if (driveLoadIdRef.current === requestId) {
+          setIsLoading(false);
+          setIsSyncing(false);
+        }
       }
     },
-    [user]
+    [showNotice]
   );
 
   useEffect(() => {
@@ -162,7 +211,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       loadDriveFiles(false);
     } else {
       setDriveFiles([]);
-      setNeedsAuth(true);
+      setNeedsReauth(false);
     }
   }, [user, loadDriveFiles]);
 
@@ -174,7 +223,6 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       const res = await googleSignIn();
       if (res?.user) {
         onAuthChange(res.user);
-        setNeedsAuth(false);
         await loadDriveFiles(true);
       }
     } catch (err: any) {
@@ -189,9 +237,10 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   const unifiedCreations = useMemo<UnifiedCreation[]>(() => {
     const map = new Map<string, UnifiedCreation>();
 
-    // 1. Add all local creations
+    // 1. Add all local creations. normalizeTitleForMatch strips ".md" and the
+    // export "-summary" suffix so a note and its Drive copy merge as one row.
     for (const item of localCreations) {
-      const normalizedTitle = item.title.trim().toLowerCase().replace(/\.md$/i, '');
+      const normalizedTitle = normalizeTitleForMatch(item.title) || item.id;
       map.set(normalizedTitle, {
         id: item.id,
         title: item.title,
@@ -209,7 +258,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
     // 2. Merge or add Drive files
     for (const driveFile of driveFiles) {
       const cleanName = driveFile.name.trim().replace(/\.md$/i, '');
-      const normalizedTitle = cleanName.toLowerCase();
+      const normalizedTitle = normalizeTitleForMatch(driveFile.name) || cleanName.toLowerCase();
 
       if (map.has(normalizedTitle)) {
         const existing = map.get(normalizedTitle)!;
@@ -233,10 +282,12 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       }
     }
 
-    // Sort descending by creation date
-    return Array.from(map.values()).sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
+    // Sort descending by creation date (invalid dates fall to the end)
+    const timeOf = (value: string) => {
+      const t = new Date(value).getTime();
+      return Number.isNaN(t) ? 0 : t;
+    };
+    return Array.from(map.values()).sort((a, b) => timeOf(b.createdAt) - timeOf(a.createdAt));
   }, [localCreations, driveFiles]);
 
   const filteredCreations = useMemo(() => {
@@ -261,29 +312,23 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   const handleView = async (item: UnifiedCreation) => {
     try {
       setActionFileId(item.id);
-      let content = item.markdownContent;
-
-      if (!content || content.includes('Full content preserved in IndexedDB')) {
-        const idbContent = await getFullCreationContent(item.id);
-        if (idbContent) content = idbContent;
-      }
-
-      if (!content && item.driveFileId) {
+      const needsDriveFetch =
+        (!item.markdownContent || isStubbedContent(item.markdownContent)) && !!item.driveFileId;
+      if (needsDriveFetch) {
         setStatusNotice('Fetching from Google Drive...');
-        content = await fetchDriveFileContent(item.driveFileId);
-        setStatusNotice(null);
       }
 
+      const content = await resolveFullContent(item);
       if (content) {
+        setStatusNotice(null);
         onSelectCreation(item.title, content);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
-        setStatusNotice('No content available for this note.');
-        setTimeout(() => setStatusNotice(null), 3000);
+        showNotice('No content available for this note.');
       }
-    } catch {
-      setStatusNotice('Failed to load note content.');
-      setTimeout(() => setStatusNotice(null), 3000);
+    } catch (err) {
+      console.warn('View note failed:', err);
+      showNotice('Failed to load note content.');
     } finally {
       setActionFileId(null);
     }
@@ -292,36 +337,17 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   const handleCopy = async (item: UnifiedCreation) => {
     try {
       setActionFileId(item.id);
-      let content = item.markdownContent;
-
-      if (!content || content.includes('Full content preserved in IndexedDB')) {
-        const idbContent = await getFullCreationContent(item.id);
-        if (idbContent) content = idbContent;
-      }
-
-      if (!content && item.driveFileId) {
-        content = await fetchDriveFileContent(item.driveFileId);
-      }
-
+      const content = await resolveFullContent(item);
       if (!content) throw new Error('No content');
 
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(content);
-      } else {
-        const textarea = document.createElement('textarea');
-        textarea.value = content;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-      }
+      const copied = await copyTextToClipboard(content);
+      if (!copied) throw new Error('Clipboard unavailable');
+
       setCopiedFileId(item.id);
       setTimeout(() => setCopiedFileId(null), 2000);
-    } catch {
-      setStatusNotice('Failed to copy note.');
-      setTimeout(() => setStatusNotice(null), 3000);
+    } catch (err) {
+      console.warn('Copy note failed:', err);
+      showNotice('Failed to copy note.');
     } finally {
       setActionFileId(null);
     }
@@ -330,31 +356,16 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   const handleDownload = async (item: UnifiedCreation) => {
     try {
       setActionFileId(item.id);
-      let content = item.markdownContent;
-
-      if (!content || content.includes('Full content preserved in IndexedDB')) {
-        const idbContent = await getFullCreationContent(item.id);
-        if (idbContent) content = idbContent;
-      }
-
-      if (!content && item.driveFileId) {
-        content = await fetchDriveFileContent(item.driveFileId);
-      }
-
+      const content = await resolveFullContent(item);
       if (!content) throw new Error('No content');
 
-      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = item.title.endsWith('.md') ? item.title : `${item.title}.md`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch {
-      setStatusNotice('Failed to download note.');
-      setTimeout(() => setStatusNotice(null), 3000);
+      downloadTextFile(
+        item.title.endsWith('.md') ? item.title : `${item.title}.md`,
+        content
+      );
+    } catch (err) {
+      console.warn('Download note failed:', err);
+      showNotice('Failed to download note.');
     } finally {
       setActionFileId(null);
     }
@@ -366,12 +377,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       setSavingToDriveId(item.id);
       setStatusNotice('Uploading note to Google Drive...');
 
-      let contentToSave = item.markdownContent;
-      if (!contentToSave || contentToSave.includes('Full content preserved in IndexedDB')) {
-        const idbContent = await getFullCreationContent(item.id);
-        if (idbContent) contentToSave = idbContent;
-      }
-
+      const contentToSave = await resolveFullContent(item);
       if (!contentToSave) {
         throw new Error('No note content found to save.');
       }
@@ -384,13 +390,11 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       updateCreationDriveInfo(item.id, result.id, result.webViewLink);
       reloadLocalCreations();
       await loadDriveFiles(false);
-      setStatusNotice('✓ Saved to Google Drive!');
-      setTimeout(() => setStatusNotice(null), 3000);
+      showNotice('✓ Saved to Google Drive!');
     } catch (err: any) {
       const formatted = formatAuthError(err);
       setAuthErrorMessage(formatted);
-      setStatusNotice('Failed to save to Google Drive.');
-      setTimeout(() => setStatusNotice(null), 4000);
+      showNotice('Failed to save to Google Drive.', 4000);
     } finally {
       setSavingToDriveId(null);
     }
@@ -399,20 +403,14 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   const handleExportBackup = async () => {
     try {
       const json = await exportCreationsBackup();
-      const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `yt-creations-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      setStatusNotice('✓ Backup JSON exported successfully.');
-      setTimeout(() => setStatusNotice(null), 3500);
+      downloadTextFile(
+        `yt-creations-backup-${new Date().toISOString().slice(0, 10)}.json`,
+        json,
+        'application/json;charset=utf-8'
+      );
+      showNotice('✓ Backup JSON exported successfully.', 3500);
     } catch {
-      setStatusNotice('Failed to export backup.');
-      setTimeout(() => setStatusNotice(null), 3500);
+      showNotice('Failed to export backup.', 3500);
     }
   };
 
@@ -422,12 +420,10 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
     try {
       const text = await file.text();
       const res = await importCreationsBackup(text);
-      setStatusNotice(`✓ ${res.message}`);
+      showNotice(`✓ ${res.message}`, 4000);
       reloadLocalCreations();
-      setTimeout(() => setStatusNotice(null), 4000);
     } catch (err: any) {
-      setStatusNotice(`Import error: ${err.message}`);
-      setTimeout(() => setStatusNotice(null), 4000);
+      showNotice(`Import error: ${err?.message || 'invalid backup file'}`, 4000);
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -436,12 +432,14 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   const handlePruneSynced = () => {
     const { freedCount } = pruneSyncedCreations();
     if (freedCount > 0) {
-      setStatusNotice(`✓ Cleaned local storage cache for ${freedCount} Drive-backed ${freedCount === 1 ? 'note' : 'notes'}.`);
+      showNotice(
+        `✓ Cleaned local storage cache for ${freedCount} Drive-backed ${freedCount === 1 ? 'note' : 'notes'}.`,
+        3500
+      );
       reloadLocalCreations();
     } else {
-      setStatusNotice('No Drive-synced notes required local cache cleanup.');
+      showNotice('No Drive-synced notes required local cache cleanup.', 3500);
     }
-    setTimeout(() => setStatusNotice(null), 3500);
   };
 
   const handleDelete = async (item: UnifiedCreation) => {
@@ -451,22 +449,28 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       deleteLocalCreation(item.id);
       reloadLocalCreations();
 
-      // If it exists in Drive and Drive is connected, delete from Drive too
+      // If it exists in Drive and Drive is connected, delete from Drive too.
+      // A Drive failure is reported explicitly instead of silently claiming success.
+      let driveDeleteFailed = false;
       if (item.driveFileId && user) {
         try {
           await deleteDriveFile(item.driveFileId);
           setDriveFiles((prev) => prev.filter((f) => f.id !== item.driveFileId));
         } catch (e) {
           console.warn('Could not delete from Drive:', e);
+          driveDeleteFailed = true;
         }
       }
 
       setConfirmDeleteId(null);
-      setStatusNotice('Note deleted.');
-      setTimeout(() => setStatusNotice(null), 3000);
-    } catch {
-      setStatusNotice('Failed to delete note.');
-      setTimeout(() => setStatusNotice(null), 3000);
+      if (driveDeleteFailed) {
+        showNotice('Note removed locally, but deleting it from Google Drive failed. Try again later.', 5000);
+      } else {
+        showNotice('Note deleted.');
+      }
+    } catch (err) {
+      console.warn('Delete note failed:', err);
+      showNotice('Failed to delete note.');
     } finally {
       setActionFileId(null);
     }
@@ -474,16 +478,13 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
 
   const formatDate = (isoString?: string) => {
     if (!isoString) return '';
-    try {
-      const d = new Date(isoString);
-      return d.toLocaleDateString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        year: d.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,
-      });
-    } catch {
-      return '';
-    }
+    const d = new Date(isoString);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: d.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,
+    });
   };
 
   const formatSize = (bytes?: number) => {

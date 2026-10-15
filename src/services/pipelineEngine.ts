@@ -2,41 +2,23 @@ import {
   ChunkBoundary,
   MediaResolution,
   TranscriptEntry,
-  VisualObservation,
   ChunkAnalysisResult,
   ChapterCluster,
   FullAnalysisReport,
   VideoMetadata,
 } from '../types/pipeline';
+import { formatTimestamp } from '../shared/time';
+import { slugifyHeading } from '../shared/markdown';
 
-/**
- * Formats seconds into HH:MM:SS or MM:SS
- */
-export function formatTimestamp(seconds: number): string {
-  const s = Math.floor(seconds);
-  const hrs = Math.floor(s / 3600);
-  const mins = Math.floor((s % 3600) / 60);
-  const secs = s % 60;
+// Single source of truth for timestamp formatting; re-exported so existing
+// importers (and this module's public API) keep working unchanged.
+export { formatTimestamp };
 
-  if (hrs > 0) {
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-}
+/** Overlap (seconds) assumed when merging consecutive chunk transcripts. */
+export const CHUNK_OVERLAP_SEC = 20;
 
-/**
- * Parses timestamp string into seconds
- */
-export function parseTimestamp(ts: string): number {
-  const parts = ts.split(':').map((p) => parseInt(p, 10));
-  if (parts.length === 3) {
-    return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  }
-  if (parts.length === 2) {
-    return parts[0] * 60 + parts[1];
-  }
-  return 0;
-}
+/** Default analysis window length for long videos. */
+export const DEFAULT_CHUNK_DURATION_SEC = 2400;
 
 /**
  * Calculates token estimates
@@ -44,8 +26,8 @@ export function parseTimestamp(ts: string): number {
 export function calculateTokenBudget(
   durationSec: number,
   resolution: MediaResolution = 'high',
-  overlapSec = 20,
-  chunkDurationSec = 2400
+  overlapSec = CHUNK_OVERLAP_SEC,
+  chunkDurationSec = DEFAULT_CHUNK_DURATION_SEC
 ) {
   const audioRate = 32;
   const videoRate = resolution === 'high' ? 258 : 66;
@@ -74,7 +56,7 @@ export function calculateTokenBudget(
 export function planChunkBoundaries(
   totalDurationSec: number,
   requestedChunkDurationSec?: number,
-  overlapSec = 15,
+  overlapSec = CHUNK_OVERLAP_SEC,
   resolution: MediaResolution = 'high'
 ): ChunkBoundary[] {
   // Adaptive window sizing: Smaller windows (5-8 mins) are analyzed in seconds by Gemini,
@@ -164,7 +146,7 @@ export function deduplicateOverlapEntries(
   existingEntries: TranscriptEntry[],
   incomingEntries: TranscriptEntry[],
   boundaryTimestampSec: number,
-  overlapWindowSec = 20
+  overlapWindowSec = CHUNK_OVERLAP_SEC
 ): { merged: TranscriptEntry[]; dedupedCount: number } {
   let dedupedCount = 0;
   const merged = [...existingEntries];
@@ -201,8 +183,7 @@ export function deduplicateOverlapEntries(
  */
 export function performHierarchicalReduce(
   chunkResults: ChunkAnalysisResult[],
-  videoMetadata: VideoMetadata,
-  roadmapTitles?: { [chunkIndex: number]: string }
+  videoMetadata: VideoMetadata
 ): { chapters: ChapterCluster[]; executiveSummary: string; keyTakeaways: string[] } {
   const chapters: ChapterCluster[] = [];
 
@@ -211,8 +192,8 @@ export function performHierarchicalReduce(
     const chapterIdx = i + 1;
     const timeRangeStr = `${formatTimestamp(chunk.startSec)} - ${formatTimestamp(chunk.endSec)}`;
 
+    // Prefer the model-derived topic title; fall back to a numbered module name.
     const title =
-      roadmapTitles?.[i] ||
       chunk.keyTakeaways[0]?.slice(0, 70) ||
       `Module ${chapterIdx}: ${timeRangeStr}`;
 
@@ -305,6 +286,15 @@ export function generateMarkdownReport(report: FullAnalysisReport): string {
     .filter((visual) => visual.description || visual.extractedTextOrCode);
   const isShort = metadata.durationSec <= 600; // <= 10 mins
 
+  // Resolve which optional sections actually render, so the table of contents
+  // and the section builders agree on anchors and numbering.
+  const effectiveVisuals = visualObservations.filter(
+    (vis) =>
+      vis.description ||
+      (vis.extractedTextOrCode && !/^(none|n\/a|null|empty)$/i.test(vis.extractedTextOrCode.trim()))
+  );
+  const cleanTranscript = transcript.filter((t) => t && t.text && t.text.trim().length > 0);
+
   let md = `# ${title}\n\n`;
   md += `**Presenter / Channel:** ${channel}  \n`;
   md += sourceUrl ? `**Source URL:** [${sourceUrl}](${sourceUrl})  \n` : '';
@@ -315,23 +305,24 @@ export function generateMarkdownReport(report: FullAnalysisReport): string {
 
   // For short videos with 1 chapter, skip a redundant TOC and jump right to summary & takeaways
   if (!isShort && chapters.length > 1) {
+    const tocSections: string[] = ['Summary', 'Key Takeaways', 'Chapter Breakdown'];
+    if (effectiveVisuals.length > 0) tocSections.push('Visual & On-Screen Notes');
+    if (cleanTranscript.length > 0) tocSections.push('Timestamped Transcript Highlights');
+
     md += `## 📑 Table of Contents\n`;
-    md += `1. [Summary](#summary)\n`;
-    md += `2. [Key Takeaways](#key-takeaways)\n`;
-    md += `3. [Chapter Breakdown](#chapter-breakdown)\n`;
-    if (visualObservations.length > 0) {
-      md += `4. [Visual & Key Points](#visual--key-points)\n`;
-      md += `5. [Timestamped Transcript Highlights](#timestamped-transcript-highlights)\n\n`;
-    } else {
-      md += `4. [Timestamped Transcript Highlights](#timestamped-transcript-highlights)\n\n`;
-    }
-    md += `---\n\n`;
+    tocSections.forEach((section, index) => {
+      // Anchor slugs match the heading ids rendered by the in-app preview (shared slugify).
+      md += `${index + 1}. [${section}](#${slugifyHeading(section)})\n`;
+    });
+    md += `\n---\n\n`;
   }
 
-  md += `## 📌 Summary\n\n${executiveSummary}\n\n`;
+  // Section headings intentionally omit emoji so their "#anchor" slugs are
+  // identical across GitHub, VS Code, and the in-app preview.
+  md += `## Summary\n\n${executiveSummary}\n\n`;
 
   md += `---\n\n`;
-  md += `## 🎯 Key Takeaways\n\n`;
+  md += `## Key Takeaways\n\n`;
   if (keyTakeaways.length > 0) {
     for (const takeaway of keyTakeaways) md += `- ${takeaway}\n`;
   } else {
@@ -341,7 +332,7 @@ export function generateMarkdownReport(report: FullAnalysisReport): string {
 
   // Chapter Breakdown
   md += `---\n\n`;
-  md += chapters.length > 1 ? `## ⏱️ Chapter Breakdown\n\n` : `## ⏱️ Overview & Timestamps\n\n`;
+  md += chapters.length > 1 ? `## Chapter Breakdown\n\n` : `## Overview & Timestamps\n\n`;
   for (const chap of chapters) {
     if (chapters.length > 1) {
       md += `### ${chap.chapterIndex}. ${chap.title} (${chap.timeRangeStr})\n\n`;
@@ -363,14 +354,10 @@ export function generateMarkdownReport(report: FullAnalysisReport): string {
   }
 
   // Visual / On-Screen Notes (only if present and meaningful)
-  const validVisuals = visualObservations.filter(
-    (vis) => vis && (vis.description || (vis.extractedTextOrCode && !/^(none|n\/a|null|empty)$/i.test(vis.extractedTextOrCode.trim())))
-  );
-
-  if (validVisuals.length > 0) {
+  if (effectiveVisuals.length > 0) {
     md += `---\n\n`;
-    md += `## 🖥️ Visual & On-Screen Notes\n\n`;
-    for (const vis of validVisuals) {
+    md += `## Visual & On-Screen Notes\n\n`;
+    for (const vis of effectiveVisuals) {
       md += `### [${vis.timestampStr}] ${vis.headline}\n\n`;
       if (vis.description) {
         md += `${vis.description}\n\n`;
@@ -384,10 +371,9 @@ export function generateMarkdownReport(report: FullAnalysisReport): string {
   }
 
   // Timestamped Transcript (clean entries only)
-  const cleanTranscript = transcript.filter((t) => t && t.text && t.text.trim().length > 0);
   if (cleanTranscript.length > 0) {
     md += `---\n\n`;
-    md += `## 📜 Timestamped Transcript Highlights\n\n`;
+    md += `## Timestamped Transcript Highlights\n\n`;
     for (const entry of cleanTranscript) {
       md += `**[${entry.timestampStr}] ${entry.speaker}:**  \n${entry.text.trim()}\n\n`;
     }

@@ -43,7 +43,13 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    onSaveKey(keyValues.join('\n'), persistLocally);
+    const cleanedKeys = keyValues.map((key) => key.trim()).filter(Boolean);
+    onSaveKey(cleanedKeys.join('\n'), persistLocally);
+    if (cleanedKeys.length === 0) {
+      // Clearing all keys is a valid action, but it must not claim "saved".
+      onClose();
+      return;
+    }
     setSavedSuccess(true);
     setTimeout(() => {
       onClose();
@@ -77,13 +83,14 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
           <button
             onClick={onClose}
             className="p-1 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+            aria-label="Close API key dialog"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Body */}
-        <form onSubmit={handleSave} className="p-5 space-y-4">
+        <form onSubmit={handleSave} className="p-5 space-y-4" role="dialog" aria-modal="true" aria-label="Gemini API key settings">
           <div className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed space-y-2">
             <p>
               Add multiple keys, one per line. The app automatically tries the next key when one is rejected, rate-limited, or exhausted.
