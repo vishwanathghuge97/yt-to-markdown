@@ -13,6 +13,13 @@ import {
   deleteLocalCreation,
   updateCreationDriveInfo,
   CreationRecord,
+  getStorageStats,
+  getFullCreationContent,
+  exportCreationsBackup,
+  importCreationsBackup,
+  pruneSyncedCreations,
+  StorageStats,
+  getAllCreationsHydrated,
 } from '../services/creationStorage';
 import {
   Clock,
@@ -31,6 +38,10 @@ import {
   Laptop,
   AlertCircle,
   Upload,
+  Database,
+  FileUp,
+  FileDown,
+  Sparkles,
 } from 'lucide-react';
 
 export interface UnifiedCreation {
@@ -72,15 +83,28 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [authErrorMessage, setAuthErrorMessage] = useState<string | null>(null);
+  const [storageStats, setStorageStats] = useState<StorageStats>(getStorageStats);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   // Reload local creations on mount and whenever lastGeneratedTime updates
   const reloadLocalCreations = useCallback(() => {
     const records = getLocalCreations();
     setLocalCreations(records);
+    setStorageStats(getStorageStats());
   }, []);
 
   useEffect(() => {
     reloadLocalCreations();
+    let isMounted = true;
+    getAllCreationsHydrated().then((hydrated) => {
+      if (isMounted && hydrated && hydrated.length > 0) {
+        setLocalCreations(hydrated);
+        setStorageStats(getStorageStats());
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
   }, [reloadLocalCreations, lastGeneratedTime]);
 
   // Load Google Drive files if user is signed in
@@ -227,11 +251,16 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
     );
   }, [unifiedCreations, activeTab, searchQuery]);
 
-  // Load content (either from local or Drive) and select it for viewing
+  // Load content (either from local, IndexedDB, or Drive) and select it for viewing
   const handleView = async (item: UnifiedCreation) => {
     try {
       setActionFileId(item.id);
       let content = item.markdownContent;
+
+      if (!content || content.includes('Full content preserved in IndexedDB')) {
+        const idbContent = await getFullCreationContent(item.id);
+        if (idbContent) content = idbContent;
+      }
 
       if (!content && item.driveFileId) {
         setStatusNotice('Fetching from Google Drive...');
@@ -258,6 +287,11 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
     try {
       setActionFileId(item.id);
       let content = item.markdownContent;
+
+      if (!content || content.includes('Full content preserved in IndexedDB')) {
+        const idbContent = await getFullCreationContent(item.id);
+        if (idbContent) content = idbContent;
+      }
 
       if (!content && item.driveFileId) {
         content = await fetchDriveFileContent(item.driveFileId);
@@ -292,6 +326,11 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       setActionFileId(item.id);
       let content = item.markdownContent;
 
+      if (!content || content.includes('Full content preserved in IndexedDB')) {
+        const idbContent = await getFullCreationContent(item.id);
+        if (idbContent) content = idbContent;
+      }
+
       if (!content && item.driveFileId) {
         content = await fetchDriveFileContent(item.driveFileId);
       }
@@ -317,13 +356,23 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
 
   // Push a local creation to Google Drive
   const handleSaveToDrive = async (item: UnifiedCreation) => {
-    if (!item.markdownContent) return;
     try {
       setSavingToDriveId(item.id);
       setStatusNotice('Uploading note to Google Drive...');
+
+      let contentToSave = item.markdownContent;
+      if (!contentToSave || contentToSave.includes('Full content preserved in IndexedDB')) {
+        const idbContent = await getFullCreationContent(item.id);
+        if (idbContent) contentToSave = idbContent;
+      }
+
+      if (!contentToSave) {
+        throw new Error('No note content found to save.');
+      }
+
       const result = await saveMarkdownToDrive(
         item.title,
-        item.markdownContent,
+        contentToSave,
         `Exported summary for ${item.title}`
       );
       updateCreationDriveInfo(item.id, result.id, result.webViewLink);
@@ -339,6 +388,54 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
     } finally {
       setSavingToDriveId(null);
     }
+  };
+
+  const handleExportBackup = async () => {
+    try {
+      const json = await exportCreationsBackup();
+      const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `yt-creations-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setStatusNotice('✓ Backup JSON exported successfully.');
+      setTimeout(() => setStatusNotice(null), 3500);
+    } catch {
+      setStatusNotice('Failed to export backup.');
+      setTimeout(() => setStatusNotice(null), 3500);
+    }
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const res = await importCreationsBackup(text);
+      setStatusNotice(`✓ ${res.message}`);
+      reloadLocalCreations();
+      setTimeout(() => setStatusNotice(null), 4000);
+    } catch (err: any) {
+      setStatusNotice(`Import error: ${err.message}`);
+      setTimeout(() => setStatusNotice(null), 4000);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handlePruneSynced = () => {
+    const { freedCount } = pruneSyncedCreations();
+    if (freedCount > 0) {
+      setStatusNotice(`✓ Cleaned local storage cache for ${freedCount} Drive-backed ${freedCount === 1 ? 'note' : 'notes'}.`);
+      reloadLocalCreations();
+    } else {
+      setStatusNotice('No Drive-synced notes required local cache cleanup.');
+    }
+    setTimeout(() => setStatusNotice(null), 3500);
   };
 
   const handleDelete = async (item: UnifiedCreation) => {
@@ -736,6 +833,71 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
           </div>
         </div>
       )}
+
+      {/* Storage Management Footer & Data Portability Bar */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleImportFile}
+        accept=".json,application/json"
+        className="hidden"
+      />
+
+      <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800/80 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs font-mono text-zinc-500 dark:text-zinc-400">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
+            <Database className="w-3.5 h-3.5 text-zinc-500" />
+            <span>Storage: {storageStats.formattedUsed}</span>
+            <span className="text-zinc-400 dark:text-zinc-500">({storageStats.itemCount} {storageStats.itemCount === 1 ? 'note' : 'notes'})</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 text-[11px]">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span>IndexedDB Durable Engine: Active</span>
+          </div>
+
+          {storageStats.status === 'near_limit' && (
+            <span className="px-2 py-1 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[11px]">
+              LocalStorage near 5MB limit
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {driveCount > 0 && (
+            <button
+              type="button"
+              onClick={handlePruneSynced}
+              className="px-2 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 transition flex items-center gap-1 border border-zinc-200 dark:border-zinc-700/60"
+              title="Frees local storage by trimming cache of notes already backed up in Google Drive"
+            >
+              <Sparkles className="w-3 h-3 text-amber-500" />
+              <span>Clean Synced Cache</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={handleExportBackup}
+            disabled={unifiedCreations.length === 0}
+            className="px-2 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition flex items-center gap-1 border border-zinc-200 dark:border-zinc-700/60 disabled:opacity-40"
+            title="Download complete JSON backup of all creations"
+          >
+            <FileDown className="w-3 h-3" />
+            <span>Backup JSON</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="px-2 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition flex items-center gap-1 border border-zinc-200 dark:border-zinc-700/60"
+            title="Import creations from a JSON backup file (e.g. migrate between local and Vercel)"
+          >
+            <FileUp className="w-3 h-3" />
+            <span>Import Backup</span>
+          </button>
+        </div>
+      </div>
     </section>
   );
 };

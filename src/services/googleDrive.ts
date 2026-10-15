@@ -178,30 +178,59 @@ export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
     throw err;
   }
 
-  let folderId: string | null = null;
+  // 1. Discover all app export folders (e.g. across local and production sessions)
+  const folderQueries: string[] = [];
   try {
-    folderId = await getOrCreateExportFolder();
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+      `name = '${FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+    )}&fields=files(id,name)`;
+    const searchRes = await fetch(searchUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (searchRes.ok) {
+      const data = await searchRes.json();
+      if (Array.isArray(data.files)) {
+        data.files.forEach((f: any) => {
+          if (f.id) folderQueries.push(`'${f.id}' in parents`);
+        });
+      }
+    }
   } catch (folderErr) {
     console.warn('Folder resolution notice:', folderErr);
   }
 
-  // Broad query ensures notes created across sessions, folders, or root are discovered
-  const query = folderId
-    ? `trashed = false and ('${folderId}' in parents or mimeType = 'text/markdown' or name contains '.md')`
-    : `trashed = false and (mimeType = 'text/markdown' or name contains '.md')`;
+  // If no folder exists yet, ensure one
+  if (folderQueries.length === 0) {
+    try {
+      const ensuredId = await getOrCreateExportFolder();
+      if (ensuredId) folderQueries.push(`'${ensuredId}' in parents`);
+    } catch {}
+  }
 
-  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
-    query
-  )}&orderBy=createdTime desc&pageSize=50&fields=files(id,name,webViewLink,createdTime,size,parents)`;
+  // 2. Build standards-compliant Drive query (avoiding invalid punctuation in contains)
+  let query = folderQueries.length > 0
+    ? `trashed = false and (${folderQueries.join(' or ')})`
+    : `trashed = false and (mimeType = 'text/markdown' or mimeType = 'text/plain')`;
 
-  let res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const fetchFiles = async (q: string) => {
+    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+      q
+    )}&orderBy=createdTime desc&pageSize=60&fields=files(id,name,webViewLink,createdTime,size,parents,description)`;
+    return await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  };
+
+  let res = await fetchFiles(query);
 
   if (res.status === 401) {
     const err: any = new Error('Google Drive session expired.');
     err.code = 'AUTH_REQUIRED';
     throw err;
+  }
+
+  // Fallback to text/markdown if specific folder search encountered an error
+  if (!res.ok) {
+    const fallbackQuery = `trashed = false and mimeType = 'text/markdown'`;
+    res = await fetchFiles(fallbackQuery);
   }
 
   if (!res.ok) {
