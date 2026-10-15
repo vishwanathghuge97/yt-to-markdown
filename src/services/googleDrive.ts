@@ -29,6 +29,41 @@ export function isAuthRequiredError(err: unknown): boolean {
 }
 
 /**
+ * Converts a failed Google Drive API response into a short, human-readable
+ * Error. Google's raw JSON payloads (long, full of console links and RPC
+ * metadata) must never reach the UI — extract just the message and explain
+ * the common config problem (Drive API not enabled for the project).
+ */
+export async function driveErrorFromResponse(action: string, res: Response): Promise<Error> {
+  let detail = '';
+  let reason = '';
+  try {
+    const text = await res.text();
+    try {
+      const parsed = JSON.parse(text);
+      detail = parsed?.error?.message || '';
+      reason = parsed?.error?.errors?.[0]?.reason || '';
+    } catch {
+      detail = text;
+    }
+  } catch {
+    // Body unavailable/consumed; report by status only.
+  }
+  detail = detail.replace(/\s+/g, ' ').trim();
+  if (detail.length > 180) detail = `${detail.slice(0, 180)}…`;
+
+  const apiDisabled =
+    reason === 'accessNotConfigured' || /has not been used in project|is disabled/i.test(detail);
+  if (res.status === 403 && apiDisabled) {
+    return new Error(
+      "Google Drive isn't enabled for this app's Google Cloud project, so Drive features can't work yet. Enable the \"Google Drive API\" in the Google Cloud Console (APIs & Services → Library), then try again in a few minutes."
+    );
+  }
+
+  return new Error(`${action} failed (${res.status})${detail ? `: ${detail}` : '.'}`);
+}
+
+/**
  * Attempts an interactive Google sign-in. Browsers block popups that are not
  * initiated by a direct user gesture, so failures surface as AUTH_REQUIRED
  * errors for the UI to handle with a "Reconnect Drive" button.
@@ -93,8 +128,7 @@ export async function getOrCreateExportFolder(
 
   const searchRes = await driveFetch(searchUrl, {}, opts);
   if (!searchRes.ok) {
-    const errorText = await searchRes.text();
-    throw new Error(`Google Drive search failed (${searchRes.status}): ${errorText}`);
+    throw await driveErrorFromResponse('Google Drive folder search', searchRes);
   }
 
   const searchData = await searchRes.json();
@@ -114,8 +148,7 @@ export async function getOrCreateExportFolder(
   }, opts);
 
   if (!createRes.ok) {
-    const errorText = await createRes.text();
-    throw new Error(`Failed to create Google Drive folder: ${errorText}`);
+    throw await driveErrorFromResponse('Creating the Google Drive folder', createRes);
   }
 
   const folderData = await createRes.json();
@@ -161,8 +194,7 @@ export async function saveMarkdownToDrive(
   });
 
   if (!uploadRes.ok) {
-    const errorText = await uploadRes.text();
-    throw new Error(`Failed to upload file to Google Drive: ${errorText}`);
+    throw await driveErrorFromResponse('Uploading the note to Google Drive', uploadRes);
   }
 
   const result = await uploadRes.json();
@@ -243,8 +275,7 @@ export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
   }
 
   if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Google Drive sync notice (${res.status}): ${errorText}`);
+    throw await driveErrorFromResponse('Google Drive sync', res);
   }
 
   const data = await res.json();
@@ -259,7 +290,7 @@ export async function fetchDriveFileContent(fileId: string): Promise<string> {
   const res = await driveFetch(url);
 
   if (!res.ok) {
-    throw new Error(`Failed to read file from Google Drive (${res.status})`);
+    throw await driveErrorFromResponse('Reading the file from Google Drive', res);
   }
 
   return await res.text();
