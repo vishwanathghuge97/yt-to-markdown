@@ -1,7 +1,8 @@
 import React from 'react';
 import { User } from 'firebase/auth';
-import { LogOut, HardDrive, Sun, Moon, Key, AlertCircle, X, FileText } from 'lucide-react';
+import { LogOut, HardDrive, Sun, Moon, Key, AlertCircle, X } from 'lucide-react';
 import { googleSignIn, logout, formatAuthError } from '../services/firebase';
+import { BrandMark } from './BrandMark';
 
 interface HeaderProps {
   user: User | null;
@@ -61,9 +62,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-4xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-1.5 sm:gap-2">
         {/* Brand */}
         <div className="flex items-center space-x-2.5 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0 shadow-xs">
-            <FileText className="w-4 h-4 text-white" aria-hidden="true" />
-          </div>
+          <BrandMark className="w-8 h-8 rounded-lg shadow-xs shrink-0" />
           <div className="flex items-baseline space-x-1.5">
             <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 tracking-tight">
               yt-to-markdown
