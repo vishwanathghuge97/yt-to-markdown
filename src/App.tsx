@@ -31,7 +31,6 @@ import { initAuth } from './services/firebase';
 import {
   Play,
   RefreshCw,
-  FileText,
   Clock,
   CheckCircle2,
   AlertCircle,
@@ -1202,26 +1201,12 @@ export default function App() {
         )}
 
         {/* 3. Output Document View */}
-        {report ? (
+        {report && (
           <MarkdownOutputView
             videoTitle={report.metadata.title}
             markdownContent={report.markdownContent}
             onOpenDriveModal={() => setIsDriveModalOpen(true)}
           />
-        ) : !isAnalyzing && (
-          <div className="card p-8 sm:p-10 text-center space-y-4 shadow-xs">
-            <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
-              <FileText className="w-6 h-6" aria-hidden="true" />
-            </div>
-            <div className="space-y-1">
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                Generate Markdown from YouTube
-              </h2>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed">
-                Paste a YouTube video link above and click <span className="font-medium text-zinc-700 dark:text-zinc-300">Generate .md</span> to export notes.
-              </p>
-            </div>
-          </div>
         )}
 
         {/* 4. Previous Creations (Integrated at bottom of main layout) */}
