@@ -163,7 +163,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   // prop) so a sync started right after sign-in sees the fresh currentUser.
   const loadDriveFiles = useCallback(
     async (isManual = false) => {
-      if (!auth.currentUser) {
+      if (!auth?.currentUser) {
         setDriveFiles([]);
         return;
       }

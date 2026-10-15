@@ -38,12 +38,14 @@ npm install
 ```
 
 ### 3. Environment Setup
-Create a `.env` file from the example (all values are optional):
+Create a `.env` file from the example:
 ```bash
 cp .env.example .env
 ```
 
 This app is **bring-your-own-key (BYOK)**: each browser supplies its own free Gemini API key through the in-app dialog, and the server never stores or falls back to a shared key. No `GEMINI_API_KEY` is required for the default deployment.
+
+To enable **Google Drive export**, fill in the `VITE_FIREBASE_*` values from your Firebase web app (Firebase Console → Project settings → Your apps). Without them, note generation still works; Drive buttons show a clear configuration error.
 
 ### 4. Run Locally
 ```bash
@@ -57,7 +59,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 1. Import this repository into [Vercel](https://vercel.com/new).
 2. Set the **Framework Preset** to `Vite`.
-3. No secret environment variables are required — users bring their own Gemini API key.
+3. Add the `VITE_FIREBASE_*` environment variables (required for Google Drive features; not needed for note generation).
 4. Click **Deploy**.
 
 > **Note for Google Drive Export:** In the Firebase Console, add your Vercel URL (e.g. `your-app.vercel.app`) to **Authentication > Settings > Authorized domains** so popup sign-in works in production.

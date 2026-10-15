@@ -5,22 +5,51 @@ import {
   GoogleAuthProvider,
   onAuthStateChanged,
   User,
+  Auth,
   signOut
 } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
 
-// Initialize Firebase with support for custom production environment variables
+// Firebase web configuration is injected at build time from VITE_FIREBASE_*
+// environment variables (see .env.example). There is intentionally no
+// committed fallback config: production provides these via the hosting
+// platform's environment variables and local development via .env.
+const env = import.meta.env;
 const config = {
-  apiKey: import.meta.env?.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey,
-  authDomain: import.meta.env?.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
-  projectId: import.meta.env?.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
-  storageBucket: import.meta.env?.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
-  messagingSenderId: import.meta.env?.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId,
-  appId: import.meta.env?.VITE_FIREBASE_APP_ID || firebaseConfig.appId,
+  apiKey: env.VITE_FIREBASE_API_KEY?.trim() || '',
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN?.trim() || '',
+  projectId: env.VITE_FIREBASE_PROJECT_ID?.trim() || '',
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET?.trim() || '',
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID?.trim() || '',
+  appId: env.VITE_FIREBASE_APP_ID?.trim() || '',
 };
 
-const app = initializeApp(config);
-export const auth = getAuth(app);
+/**
+ * True when the Firebase env vars needed for Google sign-in are present.
+ * Notes generation works without them; only the Drive features are disabled.
+ */
+export const isFirebaseConfigured = Boolean(
+  config.apiKey && config.authDomain && config.projectId && config.appId
+);
+
+// Firebase does not validate configuration at init time. Placeholder values
+// keep the app booting (notes generation) when Firebase is unconfigured, and
+// Drive actions fail later with a clear, handled error.
+const app = initializeApp(
+  isFirebaseConfigured
+    ? config
+    : { ...config, apiKey: 'unconfigured', authDomain: 'unconfigured.invalid', projectId: 'unconfigured' }
+);
+
+function createAuth(): Auth | null {
+  try {
+    return getAuth(app);
+  } catch (e) {
+    console.error('Firebase Auth unavailable:', e);
+    return null;
+  }
+}
+
+export const auth = createAuth();
 
 export const SCOPES = [
   'https://www.googleapis.com/auth/drive.file'
@@ -72,6 +101,10 @@ export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
+  if (!auth) {
+    onAuthFailure?.();
+    return () => {};
+  }
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
       const token = loadCachedAccessToken();
@@ -88,6 +121,11 @@ export const initAuth = (
 };
 
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+  if (!auth) {
+    throw new Error(
+      'Google Drive sign-in is unavailable because Firebase is not configured. Set the VITE_FIREBASE_* environment variables (see .env.example) and restart.'
+    );
+  }
   try {
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
@@ -129,7 +167,9 @@ export const getAccessToken = async (): Promise<string | null> => {
 };
 
 export const logout = async () => {
-  await signOut(auth);
+  if (auth) {
+    await signOut(auth);
+  }
   cacheAccessToken(null);
 };
 
