@@ -77,14 +77,21 @@ async function driveFetch(
 }
 
 /**
- * Ensures or creates a dedicated folder in Google Drive for app exports
+ * Ensures or creates a dedicated folder in Google Drive for app exports.
+ *
+ * Interactive re-auth (a sign-in popup) is allowed by default for explicit
+ * user actions like "Save to Drive". Background callers must pass
+ * `{ allowReauth: false }` so an expired session surfaces as AUTH_REQUIRED
+ * instead of an unexpected popup.
  */
-export async function getOrCreateExportFolder(): Promise<string> {
+export async function getOrCreateExportFolder(
+  opts: { allowReauth?: boolean } = {}
+): Promise<string> {
   // Search for existing folder
   const query = `name = '${FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   const searchUrl = `${DRIVE_FILES_URL}?q=${encodeURIComponent(query)}&fields=files(id,name)`;
 
-  const searchRes = await driveFetch(searchUrl);
+  const searchRes = await driveFetch(searchUrl, {}, opts);
   if (!searchRes.ok) {
     const errorText = await searchRes.text();
     throw new Error(`Google Drive search failed (${searchRes.status}): ${errorText}`);
@@ -104,7 +111,7 @@ export async function getOrCreateExportFolder(): Promise<string> {
       mimeType: 'application/vnd.google-apps.folder',
       description: 'Video notes and markdown transcripts exported from yt-to-markdown',
     }),
-  });
+  }, opts);
 
   if (!createRes.ok) {
     const errorText = await createRes.text();
@@ -203,10 +210,11 @@ export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
     console.warn('Folder resolution notice:', folderErr);
   }
 
-  // If no folder exists yet, ensure one
+  // If no folder exists yet, ensure one — background context: never pop up
+  // an interactive sign-in here.
   if (folderQueries.length === 0) {
     try {
-      const ensuredId = await getOrCreateExportFolder();
+      const ensuredId = await getOrCreateExportFolder({ allowReauth: false });
       if (ensuredId) folderQueries.push(`'${ensuredId}' in parents`);
     } catch {}
   }
