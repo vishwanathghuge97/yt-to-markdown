@@ -1,23 +1,21 @@
 import http from 'http';
 import path from 'path';
+import express from 'express';
 import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
 import app from './api/index';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const PORT = 3000;
+// Honor platform-injected PORT (Docker/Cloud Run) while defaulting to 3000 locally.
+const PORT = Number(process.env.PORT) || 3000;
 
 async function startServer() {
   const server = http.createServer(app);
 
   if (process.env.NODE_ENV === 'production') {
-    const express = (await import('express')).default;
     app.use(express.static(path.resolve('dist')));
-    app.get('*', (_req, res) => {
+    // Serve the SPA for every non-API GET; unknown /api/* paths keep their JSON 404.
+    app.get(/^\/(?!api\/).*/, (_req, res) => {
       res.sendFile(path.resolve('dist/index.html'));
     });
   } else {
@@ -37,11 +35,11 @@ async function startServer() {
   }
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server listening on port ${PORT}`);
+    console.log(`Server listening on http://localhost:${PORT}`);
   });
 }
 
-// Standalone server mode (AI Studio dev or Docker/Cloud Run)
+// Standalone server mode (local dev or Docker/Cloud Run)
 if (!process.env.VERCEL) {
   startServer().catch((err) => {
     console.error('Failed to start server:', err);

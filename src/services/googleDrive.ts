@@ -11,43 +11,80 @@ export interface DriveUploadResult {
 }
 
 const FOLDER_NAME = 'YouTube Summaries & Notes';
+const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files';
+const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files';
 
-async function getValidToken(): Promise<string> {
+/**
+ * Typed error the UI can recognize to offer an explicit "Reconnect Drive"
+ * action instead of silently failing.
+ */
+export function authRequiredError(message: string): Error & { code: string } {
+  const err = new Error(message) as Error & { code: string };
+  err.code = 'AUTH_REQUIRED';
+  return err;
+}
+
+export function isAuthRequiredError(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === 'AUTH_REQUIRED';
+}
+
+/**
+ * Attempts an interactive Google sign-in. Browsers block popups that are not
+ * initiated by a direct user gesture, so failures surface as AUTH_REQUIRED
+ * errors for the UI to handle with a "Reconnect Drive" button.
+ */
+async function requestFreshToken(): Promise<string> {
+  try {
+    const result = await googleSignIn();
+    if (result?.accessToken) return result.accessToken;
+  } catch (e) {
+    console.warn('Drive re-authentication failed:', e);
+  }
+  throw authRequiredError('Google Drive authorization expired. Click "Reconnect Drive" to continue.');
+}
+
+/**
+ * Authenticated fetch for Google Drive APIs. On a 401 (expired token) it
+ * re-authenticates once when interactive re-auth is allowed; background callers
+ * opt out so they never trigger unexpected popups.
+ */
+async function driveFetch(
+  url: string,
+  init: RequestInit = {},
+  opts: { allowReauth?: boolean } = {}
+): Promise<Response> {
+  const { allowReauth = true } = opts;
   let token = await getAccessToken();
   if (!token) {
-    const res = await googleSignIn();
-    token = res?.accessToken || null;
+    if (!allowReauth) throw authRequiredError('Google Drive authorization required.');
+    token = await requestFreshToken();
   }
-  if (!token) {
-    throw new Error('Not authenticated with Google Drive. Please click Connect Drive.');
+
+  const withToken = (value: string): RequestInit => ({
+    ...init,
+    headers: {
+      ...(init.headers as Record<string, string> | undefined),
+      Authorization: `Bearer ${value}`,
+    },
+  });
+
+  let res = await fetch(url, withToken(token));
+  if (res.status === 401 && allowReauth) {
+    const freshToken = await requestFreshToken();
+    res = await fetch(url, withToken(freshToken));
   }
-  return token;
+  return res;
 }
 
 /**
  * Ensures or creates a dedicated folder in Google Drive for app exports
  */
 export async function getOrCreateExportFolder(): Promise<string> {
-  let token = await getValidToken();
-
   // Search for existing folder
   const query = `name = '${FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-  const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
+  const searchUrl = `${DRIVE_FILES_URL}?q=${encodeURIComponent(query)}&fields=files(id,name)`;
 
-  let searchRes = await fetch(searchUrl, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (searchRes.status === 401) {
-    const reauth = await googleSignIn();
-    if (reauth?.accessToken) {
-      token = reauth.accessToken;
-      searchRes = await fetch(searchUrl, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    }
-  }
-
+  const searchRes = await driveFetch(searchUrl);
   if (!searchRes.ok) {
     const errorText = await searchRes.text();
     throw new Error(`Google Drive search failed (${searchRes.status}): ${errorText}`);
@@ -59,12 +96,9 @@ export async function getOrCreateExportFolder(): Promise<string> {
   }
 
   // Create folder
-  const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+  const createRes = await driveFetch(DRIVE_FILES_URL, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name: FOLDER_NAME,
       mimeType: 'application/vnd.google-apps.folder',
@@ -89,8 +123,6 @@ export async function saveMarkdownToDrive(
   content: string,
   description?: string
 ): Promise<DriveUploadResult> {
-  let token = await getValidToken();
-
   // Ensure destination folder
   const folderId = await getOrCreateExportFolder();
 
@@ -114,35 +146,12 @@ export async function saveMarkdownToDrive(
     content +
     closeDelimiter;
 
-  let uploadRes = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,createdTime',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`,
-      },
-      body: multipartRequestBody,
-    }
-  );
-
-  if (uploadRes.status === 401) {
-    const reauth = await googleSignIn();
-    if (reauth?.accessToken) {
-      token = reauth.accessToken;
-      uploadRes = await fetch(
-        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,createdTime',
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': `multipart/related; boundary=${boundary}`,
-          },
-          body: multipartRequestBody,
-        }
-      );
-    }
-  }
+  const uploadUrl = `${DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,webViewLink,createdTime`;
+  const uploadRes = await driveFetch(uploadUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body: multipartRequestBody,
+  });
 
   if (!uploadRes.ok) {
     const errorText = await uploadRes.text();
@@ -168,29 +177,24 @@ export async function saveMarkdownToDrive(
 }
 
 /**
- * Fetches recent files exported to the yt-to-markdown notes folder or Drive
+ * Fetches recent files exported to the yt-to-markdown notes folder or Drive.
+ * Background sync: never opens a sign-in popup; expired sessions raise
+ * AUTH_REQUIRED so the UI can ask the user to reconnect.
  */
 export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
-  let token = await getAccessToken();
-  if (!token) {
-    const err: any = new Error('Google Drive authorization required.');
-    err.code = 'AUTH_REQUIRED';
-    throw err;
-  }
+  const backgroundOpts = { allowReauth: false };
 
   // 1. Discover all app export folders (e.g. across local and production sessions)
   const folderQueries: string[] = [];
   try {
-    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+    const searchUrl = `${DRIVE_FILES_URL}?q=${encodeURIComponent(
       `name = '${FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
     )}&fields=files(id,name)`;
-    const searchRes = await fetch(searchUrl, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const searchRes = await driveFetch(searchUrl, {}, backgroundOpts);
     if (searchRes.ok) {
       const data = await searchRes.json();
       if (Array.isArray(data.files)) {
-        data.files.forEach((f: any) => {
+        data.files.forEach((f: { id?: string }) => {
           if (f.id) folderQueries.push(`'${f.id}' in parents`);
         });
       }
@@ -208,29 +212,26 @@ export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
   }
 
   // 2. Build standards-compliant Drive query (avoiding invalid punctuation in contains)
-  let query = folderQueries.length > 0
+  const query = folderQueries.length > 0
     ? `trashed = false and (${folderQueries.join(' or ')})`
     : `trashed = false and (mimeType = 'text/markdown' or mimeType = 'text/plain')`;
 
-  const fetchFiles = async (q: string) => {
-    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+  const fetchFiles = (q: string) => {
+    const url = `${DRIVE_FILES_URL}?q=${encodeURIComponent(
       q
     )}&orderBy=createdTime desc&pageSize=60&fields=files(id,name,webViewLink,createdTime,size,parents,description)`;
-    return await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    return driveFetch(url, {}, backgroundOpts);
   };
 
   let res = await fetchFiles(query);
 
   if (res.status === 401) {
-    const err: any = new Error('Google Drive session expired.');
-    err.code = 'AUTH_REQUIRED';
-    throw err;
+    throw authRequiredError('Google Drive session expired.');
   }
 
-  // Fallback to text/markdown if specific folder search encountered an error
+  // Fallback to text/markdown if the specific folder search encountered an error
   if (!res.ok) {
-    const fallbackQuery = `trashed = false and mimeType = 'text/markdown'`;
-    res = await fetchFiles(fallbackQuery);
+    res = await fetchFiles(`trashed = false and mimeType = 'text/markdown'`);
   }
 
   if (!res.ok) {
@@ -242,27 +243,12 @@ export async function listRecentDriveExports(): Promise<DriveUploadResult[]> {
   return data.files || [];
 }
 
-
 /**
  * Reads the raw markdown content of a file from Google Drive
  */
 export async function fetchDriveFileContent(fileId: string): Promise<string> {
-  let token = await getValidToken();
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
-
-  let res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (res.status === 401) {
-    const reauth = await googleSignIn();
-    if (reauth?.accessToken) {
-      token = reauth.accessToken;
-      res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    }
-  }
+  const url = `${DRIVE_FILES_URL}/${encodeURIComponent(fileId)}?alt=media`;
+  const res = await driveFetch(url);
 
   if (!res.ok) {
     throw new Error(`Failed to read file from Google Drive (${res.status})`);
@@ -275,24 +261,8 @@ export async function fetchDriveFileContent(fileId: string): Promise<string> {
  * Deletes a file from the user's Google Drive folder
  */
 export async function deleteDriveFile(fileId: string): Promise<boolean> {
-  let token = await getValidToken();
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`;
-
-  let res = await fetch(url, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (res.status === 401) {
-    const reauth = await googleSignIn();
-    if (reauth?.accessToken) {
-      token = reauth.accessToken;
-      res = await fetch(url, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    }
-  }
+  const url = `${DRIVE_FILES_URL}/${encodeURIComponent(fileId)}`;
+  const res = await driveFetch(url, { method: 'DELETE' });
 
   if (!res.ok && res.status !== 204 && res.status !== 404) {
     throw new Error(`Failed to delete file from Google Drive (${res.status})`);

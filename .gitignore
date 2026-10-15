@@ -5,5 +5,8 @@ coverage/
 .DS_Store
 *.log
 .aistudio
+.vercel/
+.vite/
+*.tsbuildinfo
 .env*
 !.env.example

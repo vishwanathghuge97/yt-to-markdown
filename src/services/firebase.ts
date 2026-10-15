@@ -11,12 +11,12 @@ import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase with support for custom production environment variables
 const config = {
-  apiKey: (import.meta as any).env?.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey,
-  authDomain: (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
-  projectId: (import.meta as any).env?.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
-  storageBucket: (import.meta as any).env?.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
-  messagingSenderId: (import.meta as any).env?.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId,
-  appId: (import.meta as any).env?.VITE_FIREBASE_APP_ID || firebaseConfig.appId,
+  apiKey: import.meta.env?.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey,
+  authDomain: import.meta.env?.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
+  projectId: import.meta.env?.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
+  storageBucket: import.meta.env?.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
+  messagingSenderId: import.meta.env?.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId,
+  appId: import.meta.env?.VITE_FIREBASE_APP_ID || firebaseConfig.appId,
 };
 
 const app = initializeApp(config);
@@ -32,10 +32,17 @@ SCOPES.forEach((scope) => provider.addScope(scope));
 const DRIVE_TOKEN_KEY = 'yt_markdown_drive_access_token';
 const DRIVE_TOKEN_TIME_KEY = 'yt_markdown_drive_access_token_time';
 
+/**
+ * Reads the cached Drive access token. Tokens are session-scoped credentials:
+ * they are kept in sessionStorage (and memory) only, never in localStorage.
+ */
 function loadCachedAccessToken(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    return localStorage.getItem(DRIVE_TOKEN_KEY) || sessionStorage.getItem(DRIVE_TOKEN_KEY);
+    // Purge legacy localStorage copies written by older app versions.
+    localStorage.removeItem(DRIVE_TOKEN_KEY);
+    localStorage.removeItem(DRIVE_TOKEN_TIME_KEY);
+    return sessionStorage.getItem(DRIVE_TOKEN_KEY);
   } catch {
     return null;
   }
@@ -48,8 +55,6 @@ function cacheAccessToken(token: string | null) {
   if (typeof window === 'undefined') return;
   try {
     if (token) {
-      localStorage.setItem(DRIVE_TOKEN_KEY, token);
-      localStorage.setItem(DRIVE_TOKEN_TIME_KEY, String(Date.now()));
       sessionStorage.setItem(DRIVE_TOKEN_KEY, token);
       sessionStorage.setItem(DRIVE_TOKEN_TIME_KEY, String(Date.now()));
     } else {
@@ -62,14 +67,12 @@ function cacheAccessToken(token: string | null) {
     console.warn('Storage operation failed:', e);
   }
 }
-let currentUser: User | null = null;
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
-    currentUser = user;
     if (user) {
       const token = loadCachedAccessToken();
       if (onAuthSuccess) {
@@ -93,7 +96,6 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     }
 
     cacheAccessToken(credential.accessToken);
-    currentUser = result.user;
     return { user: result.user, accessToken: credential.accessToken };
   } catch (error: any) {
     console.error('Sign-in error:', error);
@@ -104,7 +106,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 export function isTokenExpired(): boolean {
   if (typeof window === 'undefined') return true;
   try {
-    const timeStr = localStorage.getItem(DRIVE_TOKEN_TIME_KEY) || sessionStorage.getItem(DRIVE_TOKEN_TIME_KEY);
+    const timeStr = sessionStorage.getItem(DRIVE_TOKEN_TIME_KEY);
     if (!timeStr) return true;
     const time = parseInt(timeStr, 10);
     // Google OAuth access tokens expire after 1 hour (3600s). Treat as expired after 50 minutes.
@@ -116,6 +118,8 @@ export function isTokenExpired(): boolean {
 
 export const getAccessToken = async (): Promise<string | null> => {
   if (isTokenExpired()) {
+    // Drop the stale token so the UI shows "Reconnect Drive" instead of retrying it.
+    cacheAccessToken(null);
     return null;
   }
   if (!cachedAccessToken) {
@@ -124,14 +128,9 @@ export const getAccessToken = async (): Promise<string | null> => {
   return cachedAccessToken;
 };
 
-export const getCurrentUser = (): User | null => {
-  return currentUser;
-};
-
 export const logout = async () => {
   await signOut(auth);
   cacheAccessToken(null);
-  currentUser = null;
 };
 
 export function formatAuthError(error: any): string {

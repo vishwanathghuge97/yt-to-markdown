@@ -2,6 +2,16 @@ import express from 'express';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { YoutubeTranscript } from 'youtube-transcript';
+import { extractYouTubeVideoId, getCanonicalYouTubeUrl } from '../src/shared/youtubeUrl';
+import { cleanAndParseJson } from '../src/shared/jsonRepair';
+import {
+  GEMINI_MODELS,
+  isInvalidApiKeyError,
+  isQuotaError,
+  isTransientGeminiError,
+  sanitizeErrorMessage,
+} from '../src/shared/gemini';
+import { formatTimestamp } from '../src/shared/time';
 
 dotenv.config();
 
@@ -33,7 +43,7 @@ function groupRawCaptions(rawCaptions: any[], speaker: string): any[] {
           id: `grouped-cap-${grouped.length}`,
           startSec: currentStart,
           endSec: lastEnd,
-          timestampStr: formatTime(currentStart),
+          timestampStr: formatTimestamp(currentStart, true),
           speaker,
           text: currentTexts.join(' '),
         });
@@ -54,7 +64,7 @@ function groupRawCaptions(rawCaptions: any[], speaker: string): any[] {
       id: `grouped-cap-${grouped.length}`,
       startSec: currentStart,
       endSec: lastEnd,
-      timestampStr: formatTime(currentStart),
+      timestampStr: formatTimestamp(currentStart, true),
       speaker,
       text: currentTexts.join(' '),
     });
@@ -65,6 +75,16 @@ function groupRawCaptions(rawCaptions: any[], speaker: string): any[] {
 
 const app = express();
 
+// Tuning constants. MODEL_CALL_TIMEOUT_MS must stay below the platform's 15s
+// function limit (vercel.json maxDuration) and the client's 14s request abort,
+// so the API always answers with a JSON error instead of being killed.
+const MODEL_CALL_TIMEOUT_MS = 12_000;
+const GEMINI_HTTP_TIMEOUT_MS = 13_000;
+const CALL_RETRY_DELAY_MS = 1_200;
+const FETCH_TIMEOUT_MS = 3_500;
+const MAX_JSON_BODY_SIZE = '4mb'; // below Vercel's ~4.5MB request body limit
+const GEMINI_USER_AGENT = 'yt-to-markdown/1.2 (+https://yt-to-markdown.vercel.app)';
+
 // Warm Vercel instances can reuse these results across retries and repeated
 // analyses of the same video.
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -72,7 +92,47 @@ const infoCache = new Map<string, { expiresAt: number; value: unknown }>();
 const transcriptCache = new Map<string, { expiresAt: number; value: any[] }>();
 const inFlightTranscripts = new Map<string, Promise<any[]>>();
 
-async function fetchWithTimeout(input: string, init: RequestInit = {}, timeoutMs = 3500): Promise<Response> {
+/** Coerces untrusted JSON values into finite numbers with a fallback. */
+function toFiniteNumber(value: unknown, fallback = 0): number {
+  const num = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+/** Coerces and clamps untrusted JSON values into a safe numeric range. */
+function clampNumber(value: unknown, min: number, max: number, fallback = min): number {
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.min(max, Math.max(min, num));
+}
+
+/** Reads the caller-supplied Gemini key from the header (preferred) or JSON body. */
+function readUserApiKey(req: express.Request): string {
+  const header = req.headers['x-gemini-api-key'];
+  const headerValue = Array.isArray(header) ? header[0] : header;
+  const bodyValue = req.body && typeof req.body === 'object' ? (req.body as any).apiKey : '';
+  return String(headerValue || bodyValue || '').trim();
+}
+
+/**
+ * BYOK guard for every Gemini route. Without this, the deployed API would fall
+ * back to the operator's env key and become an open proxy that anyone can spend.
+ */
+function requireUserApiKey(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const userApiKey = readUserApiKey(req);
+  if (!userApiKey) {
+    return res.status(401).json({
+      error: 'Your Gemini API key is required. Add your free key in the app header and retry.',
+    });
+  }
+  res.locals.userApiKey = userApiKey;
+  next();
+}
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit = {},
+  timeoutMs = FETCH_TIMEOUT_MS
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -84,12 +144,12 @@ async function fetchWithTimeout(input: string, init: RequestInit = {}, timeoutMs
 
 function errorResponse(error: any, fallback: string) {
   const message = String(error?.message || '');
-  const status = Number(error?.status || error?.code);
+  const status = toFiniteNumber(error?.status ?? error?.code, 0);
   if (/api key is required/i.test(message)) return { status: 401, error: 'Your Gemini API key is required.' };
-  if (status === 401 || status === 403 || /invalid.*key|permission denied/i.test(message)) {
+  if (status === 401 || status === 403 || isInvalidApiKeyError(message)) {
     return { status: 401, error: 'The Gemini API key was rejected. Check that it is active and has access to the selected model.' };
   }
-  if (status === 429 || /rate limit|quota|resource exhausted/i.test(message)) {
+  if (status === 429 || isQuotaError(message)) {
     return { status: 429, error: 'Gemini rate limit reached. Please wait briefly and try again.' };
   }
   if (error?.name === 'AbortError' || /timeout|timed out/i.test(message)) {
@@ -112,10 +172,7 @@ function setCached<T>(cache: Map<string, { expiresAt: number; value: T }>, key: 
   cache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
 }
 
-// Middleware: JSON parser with 10mb limit
-app.use(express.json({ limit: '10mb' }));
-
-// Middleware: Permissive CORS to allow seamless API calls from Vercel & dev preview
+// Middleware: Permissive CORS first, so even JSON-parse errors carry CORS headers
 app.use((_req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -126,9 +183,11 @@ app.use((_req, res, next) => {
   next();
 });
 
-// Dynamic Gemini Client getter with network timeout and user agent
+app.use(express.json({ limit: MAX_JSON_BODY_SIZE }));
+
+// Dynamic Gemini Client getter (BYOK only: routes guarantee a caller key)
 function getAiClient(userApiKey?: string): GoogleGenAI {
-  const key = (userApiKey && userApiKey.trim()) || process.env.GEMINI_API_KEY;
+  const key = String(userApiKey || '').trim();
   if (!key) {
     throw new Error(
       'A Gemini API key is required. Please click "API Key Set" or "Enter Free Key" in the top bar to provide your free Google Gemini API key.'
@@ -137,9 +196,9 @@ function getAiClient(userApiKey?: string): GoogleGenAI {
   return new GoogleGenAI({
     apiKey: key,
     httpOptions: {
-      timeout: 55000,
+      timeout: GEMINI_HTTP_TIMEOUT_MS,
       headers: {
-        'User-Agent': 'aistudio-build',
+        'User-Agent': GEMINI_USER_AGENT,
       },
     },
   });
@@ -187,136 +246,21 @@ async function callWithTimeout<T>(
 }
 
 /**
- * Helper to safely extract and parse JSON from LLM outputs,
- * stripping markdown code fences or conversational wrappers and handling edge cases.
- */
-function cleanAndParseJson<T = any>(rawText: string): T {
-  if (!rawText) throw new Error('Empty response from model');
-  let text = rawText.trim();
-
-  // Extract from markdown code fences if wrapped in conversational text
-  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (codeBlockMatch && codeBlockMatch[1]) {
-    text = codeBlockMatch[1].trim();
-  }
-
-  // 1. Direct parse attempt
-  try {
-    return JSON.parse(text);
-  } catch {}
-
-  // 2. Extract outermost JSON object or array
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-  const firstBracket = text.indexOf('[');
-  const lastBracket = text.lastIndexOf(']');
-
-  const isObjectFirst = firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket);
-
-  if (isObjectFirst && lastBrace > firstBrace) {
-    try {
-      return JSON.parse(text.slice(firstBrace, lastBrace + 1));
-    } catch {}
-  } else if (firstBracket !== -1 && lastBracket > firstBracket) {
-    try {
-      return JSON.parse(text.slice(firstBracket, lastBracket + 1));
-    } catch {}
-  }
-
-  // 3. Clean common LLM formatting anomalies (trailing commas, control chars)
-  const candidate = isObjectFirst && lastBrace > firstBrace
-    ? text.slice(firstBrace, lastBrace + 1)
-    : firstBracket !== -1 && lastBracket > firstBracket
-      ? text.slice(firstBracket, lastBracket + 1)
-      : text;
-
-  try {
-    const sanitized = candidate
-      .replace(/,\s*([}\]])/g, '$1')
-      .replace(/[\u0000-\u001F\u007F-\u009F]/g, (char) => (char === '\n' || char === '\r' || char === '\t' ? char : ''));
-
-    return JSON.parse(sanitized);
-  } catch {}
-
-  // 4. Auto-close truncated JSON if stream ended abruptly
-  try {
-    let repaired = candidate
-      .replace(/,\s*([}\]])/g, '$1')
-      .replace(/[\u0000-\u001F\u007F-\u009F]/g, (char) => (char === '\n' || char === '\r' || char === '\t' ? char : ''));
-    const openBraces = (repaired.match(/\{/g) || []).length;
-    const closeBraces = (repaired.match(/\}/g) || []).length;
-    const openBrackets = (repaired.match(/\[/g) || []).length;
-    const closeBrackets = (repaired.match(/\]/g) || []).length;
-    if (openBrackets > closeBrackets) {
-      repaired += ']'.repeat(openBrackets - closeBrackets);
-    }
-    if (openBraces > closeBraces) {
-      repaired += '}'.repeat(openBraces - closeBraces);
-    }
-    return JSON.parse(repaired);
-  } catch (err: any) {
-    throw new Error(`Failed to parse model output as JSON: ${err.message}`);
-  }
-}
-
-// Strict & resilient YouTube Video ID extractor handling all desktop, mobile, embed, and share formats
-function extractYouTubeVideoId(input: string): string | null {
-  if (!input) return null;
-  let trimmed = input.trim();
-
-  // Strip enclosing quotes, markdown angle brackets <...>, or extra whitespace
-  trimmed = trimmed.replace(/^[<"'\s]+|[>"'\s]+$/g, '');
-
-  // Decode URI component if pasted as encoded string
-  if (trimmed.includes('%3A') || trimmed.includes('%2F')) {
-    try {
-      trimmed = decodeURIComponent(trimmed);
-    } catch {}
-  }
-
-  // Direct 11-char ID
-  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
-    return trimmed;
-  }
-
-  const match = trimmed.match(
-    /(?:https?:\/\/)?(?:(?:www|m|music)\.)?(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/|e\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i
-  );
-  return match ? match[1] : null;
-}
-
-function getCanonicalYouTubeUrl(input: string): string {
-  const id = extractYouTubeVideoId(input);
-  return id ? `https://www.youtube.com/watch?v=${id}` : input.trim();
-}
-
-// Helper to format seconds as HH:MM:SS
-function formatTime(s: number) {
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = Math.floor(s % 60);
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-}
-
-/**
  * Grounded model caller with per-call timeout, transient error retry, and multi-model cascade.
  */
 async function generateWithCascade(
-  contentsOrPrompt: string | any[],
+  prompt: string,
   jsonMode = true,
   videoUri?: string,
   userApiKey?: string,
-  onTextChunk?: (text: string) => void,
-  videoWindow?: { startSec: number; endSec: number },
-  callTimeoutMs = 52000
+  videoWindow?: { startSec: number; endSec: number }
 ): Promise<{ text: string; modelUsed: string }> {
   const aiClient = getAiClient(userApiKey);
-  const models = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
   const canonicalVideo = videoUri ? getCanonicalYouTubeUrl(videoUri) : undefined;
   let lastError: any = null;
 
-  for (const model of models) {
-    if (typeof contentsOrPrompt === 'string' && canonicalVideo) {
+  for (const model of GEMINI_MODELS) {
+    if (canonicalVideo) {
       // Try model with 1 transient retry on 503 / 429
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
@@ -344,42 +288,25 @@ async function generateWithCascade(
               role: 'user',
               parts: [
                 videoPart,
-                { text: contentsOrPrompt },
+                { text: prompt },
               ],
             },
           ];
 
-          if (onTextChunk) {
-            let text = '';
-            const stream = await callWithTimeout(
-              aiClient.models.generateContentStream({ model, contents: payloadContents, config }),
-              callTimeoutMs,
-              `Streaming from ${model} timed out after ${Math.round(callTimeoutMs / 1000)}s`
-            );
-            for await (const chunk of stream) {
-              const chunkText = chunk.text || '';
-              if (chunkText) {
-                text += chunkText;
-                onTextChunk(chunkText);
-              }
-            }
-            if (text.trim()) return { text, modelUsed: model };
-          } else {
-            const response = await callWithTimeout(
-              aiClient.models.generateContent({ model, contents: payloadContents, config }),
-              callTimeoutMs,
-              `Call to ${model} timed out after ${Math.round(callTimeoutMs / 1000)}s`
-            );
-            const extracted = extractResponseText(response);
-            if (extracted.trim()) return { text: extracted, modelUsed: model };
-          }
+          const response = await callWithTimeout(
+            aiClient.models.generateContent({ model, contents: payloadContents, config }),
+            MODEL_CALL_TIMEOUT_MS,
+            `Call to ${model} timed out after ${Math.round(MODEL_CALL_TIMEOUT_MS / 1000)}s`
+          );
+          const extracted = extractResponseText(response);
+          if (extracted.trim()) return { text: extracted, modelUsed: model };
         } catch (err: any) {
-          const msg = String(err?.message || '');
-          const isBusy = /503|high demand|unavailable|429|rate limit|quota/i.test(msg);
+          const msg = sanitizeErrorMessage(err);
+          const isBusy = isTransientGeminiError(err);
           console.warn(`Model ${model} attempt ${attempt + 1} with video attachment failed: ${msg}.`);
           lastError = err;
           if (isBusy && attempt === 0) {
-            await new Promise((r) => setTimeout(r, 1200));
+            await new Promise((r) => setTimeout(r, CALL_RETRY_DELAY_MS));
             continue;
           }
           break; // If timed out or on second attempt, move immediately to next candidate model
@@ -397,45 +324,20 @@ async function generateWithCascade(
           config.responseMimeType = 'application/json';
         }
 
-        if (onTextChunk) {
-          let text = '';
-          const stream = await callWithTimeout(
-            aiClient.models.generateContentStream({
-              model,
-              contents: typeof contentsOrPrompt === 'string' ? contentsOrPrompt : contentsOrPrompt,
-              config,
-            }),
-            callTimeoutMs,
-            `Text streaming from ${model} timed out`
-          );
-          for await (const chunk of stream) {
-            const chunkText = chunk.text || '';
-            if (chunkText) {
-              text += chunkText;
-              onTextChunk(chunkText);
-            }
-          }
-          if (text.trim()) return { text, modelUsed: model };
-        } else {
-          const response = await callWithTimeout(
-            aiClient.models.generateContent({
-              model,
-              contents: typeof contentsOrPrompt === 'string' ? contentsOrPrompt : contentsOrPrompt,
-              config,
-            }),
-            callTimeoutMs,
-            `Text generation from ${model} timed out`
-          );
-          const extracted = extractResponseText(response);
-          if (extracted.trim()) return { text: extracted, modelUsed: model };
-        }
+        const response = await callWithTimeout(
+          aiClient.models.generateContent({ model, contents: prompt, config }),
+          MODEL_CALL_TIMEOUT_MS,
+          `Text generation from ${model} timed out`
+        );
+        const extracted = extractResponseText(response);
+        if (extracted.trim()) return { text: extracted, modelUsed: model };
       } catch (err: any) {
-        const msg = String(err?.message || '');
-        const isBusy = /503|high demand|unavailable|429|rate limit|quota/i.test(msg);
+        const msg = sanitizeErrorMessage(err);
+        const isBusy = isTransientGeminiError(err);
         console.warn(`Model ${model} text attempt ${attempt + 1} failed: ${msg}.`);
         lastError = err;
         if (isBusy && attempt === 0) {
-          await new Promise((r) => setTimeout(r, 1200));
+          await new Promise((r) => setTimeout(r, CALL_RETRY_DELAY_MS));
           continue;
         }
         break;
@@ -600,7 +502,9 @@ router.get('/youtube/info', async (req, res) => {
     }
 
     // Step 3: If duration is still 0 or undetermined, parse title/description hints or default
+    let durationEstimated = false;
     if (!durationSec || durationSec === 0) {
+      durationEstimated = true;
       const fullText = `${title} ${description}`;
       const hourMatch = fullText.match(/\b(\d+)\s*(?:hours?|hrs?|h)\b/i);
       const minMatch = fullText.match(/\b(\d+)\s*(?:minutes?|mins?|m)\b/i);
@@ -641,6 +545,7 @@ router.get('/youtube/info', async (req, res) => {
       author,
       thumbnail,
       durationSec,
+      durationEstimated,
       description: description.slice(0, 3000),
       creatorChapters: creatorChapters.sort((a, b) => a.startSec - b.startSec),
       url: getCanonicalYouTubeUrl(url),
@@ -649,90 +554,36 @@ router.get('/youtube/info', async (req, res) => {
     setCached(infoCache, videoId, info);
     return res.json(info);
   } catch (err: any) {
-    console.error('YouTube info error:', err);
+    console.error('YouTube info error:', sanitizeErrorMessage(err));
     const failure = errorResponse(err, 'Failed to inspect the YouTube video. Please verify the link and try again.');
     return res.status(failure.status).json({ error: failure.error });
   }
 });
 
-// 2. Video Roadmap Endpoint
-router.post('/gemini/course-roadmap', async (req, res) => {
-  try {
-    const { videoUrl, videoTitle, channelTitle, durationSec, numSegments, creatorChapters, videoDescription, apiKey: bodyApiKey } = req.body;
-    const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
-    getAiClient(userApiKey); // Fail fast before building prompts or contacting YouTube.
-    const durationFormatted = formatTime(durationSec || 600);
-    const isShort = (durationSec || 600) <= 600;
-
-    const hasCreatorChapters = Array.isArray(creatorChapters) && creatorChapters.length > 1;
-
-    const prompt = `
-CRITICAL INSTRUCTION - STRICT FACTUAL GROUNDING:
-You are an expert video analyst inspecting this exact video:
-URL: ${videoUrl || 'YouTube Video'}
-Title: "${videoTitle}"
-Channel: "${channelTitle}"
-Total Duration: ${durationFormatted} (${durationSec} seconds).
-Requested Segments: ${numSegments || (isShort ? 1 : 4)}.
-
-GROUNDING RULES:
-- Use only information visible or audible in the supplied video and the supplied metadata.
-- Do not infer topics, chapters, or teaching points from the title alone.
-- If a section cannot be confidently identified, use a neutral title such as "Unclear section" rather than inventing one.
-
-${videoDescription ? `Video Description/Context:\n"""\n${videoDescription.slice(0, 1500)}\n"""\n` : ''}
-
-${hasCreatorChapters ? `Author-Provided Timestamps / Chapters:\n${JSON.stringify(creatorChapters, null, 2)}\n` : ''}
-
-Task:
-Generate a chronological segmentation breakdown roadmap for this video.
-Partition the duration (0 to ${durationSec} seconds) into sequential non-overlapping segments.
-
-Return ONLY a JSON array with exactly this format:
-[
-  {
-    "segmentIndex": 0,
-    "startSec": 0,
-    "endSec": 300,
-    "title": "Clear Chapter Title",
-    "summary": "1-2 sentence overview of what is taught in this part",
-    "keyTopics": ["Topic 1", "Topic 2"]
-  }
-]
-`;
-
-    const result = await generateWithCascade(prompt, true, videoUrl, userApiKey);
-    const parsed = cleanAndParseJson<any[]>(result.text);
-    return res.json({ roadmap: parsed, modelUsed: result.modelUsed });
-  } catch (err: any) {
-    console.warn('Course roadmap error:', err);
-    const failure = errorResponse(err, 'Could not build the video roadmap. Please try again.');
-    return res.status(failure.status).json({ error: failure.error });
-  }
-});
-
-// 3. Analyze Chunk Endpoint
-router.post('/gemini/analyze-chunk', async (req, res) => {
+// 2. Analyze Chunk Endpoint
+router.post('/gemini/analyze-chunk', requireUserApiKey, async (req, res) => {
   try {
     const {
       videoUrl,
       videoTitle,
       channelTitle,
-      chunkIndex: bodyChunkIndex,
       segmentIndex,
-      nominalStartSec = 0,
-      nominalEndSec = 60,
       topicContextHint,
       keyTopicsHint,
       videoDescription,
-      apiKey: bodyApiKey,
     } = req.body;
 
-    const chunkIndex = bodyChunkIndex ?? segmentIndex ?? 0;
-    const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
-    getAiClient(userApiKey);
-    const startFormatted = formatTime(nominalStartSec);
-    const endFormatted = formatTime(nominalEndSec);
+    if (!extractYouTubeVideoId(videoUrl)) {
+      return res.status(400).json({ error: 'A valid YouTube video URL is required.' });
+    }
+
+    const chunkIndex = Math.floor(clampNumber(req.body.chunkIndex ?? segmentIndex, 0, 5000, 0));
+    const nominalStartSec = Math.floor(clampNumber(req.body.nominalStartSec, 0, 86400, 0));
+    const nominalEndSec = Math.floor(
+      clampNumber(req.body.nominalEndSec, nominalStartSec + 1, 86400, nominalStartSec + 60)
+    );
+    const startFormatted = formatTimestamp(nominalStartSec, true);
+    const endFormatted = formatTimestamp(nominalEndSec, true);
     const chunkSpanSec = Math.max(1, nominalEndSec - nominalStartSec);
 
     const prompt = `
@@ -742,7 +593,7 @@ Video URL: ${videoUrl || 'YouTube Video'}
 Title: "${videoTitle}"
 Channel / Speaker: "${channelTitle || 'Speaker'}"
 Segment Subject / Focus: ${topicContextHint || `Segment ${chunkIndex + 1}`}
-${keyTopicsHint ? `Key topics: ${JSON.stringify(keyTopicsHint)}` : ''}
+${keyTopicsHint ? `Key topics: ${JSON.stringify(keyTopicsHint).slice(0, 1000)}` : ''}
 ${videoDescription ? `Video Context: ${videoDescription.slice(0, 500)}` : ''}
 
 STRICT ACCURACY & TECHNICAL FIDELITY RULES:
@@ -774,7 +625,7 @@ Return strict JSON format:
   "visualObservations": [
     {
       "timestampSec": ${nominalStartSec + Math.floor(chunkSpanSec / 3)},
-      "timestampStr": "${formatTime(nominalStartSec + Math.floor(chunkSpanSec / 3))}",
+      "timestampStr": "${formatTimestamp(nominalStartSec + Math.floor(chunkSpanSec / 3), true)}",
       "type": "demo",
       "headline": "Visual event or screen demonstration",
       "extractedTextOrCode": "",
@@ -784,14 +635,10 @@ Return strict JSON format:
 }
 `;
 
-    const genResult = await generateWithCascade(
-      prompt,
-      true,
-      videoUrl,
-      userApiKey,
-      undefined,
-      { startSec: nominalStartSec, endSec: nominalEndSec }
-    );
+    const genResult = await generateWithCascade(prompt, true, videoUrl, res.locals.userApiKey, {
+      startSec: nominalStartSec,
+      endSec: nominalEndSec,
+    });
     const parsed = cleanAndParseJson<any>(genResult.text);
 
     const transcriptList = Array.isArray(parsed.transcript) && parsed.transcript.length > 0
@@ -799,7 +646,7 @@ Return strict JSON format:
           id: `chunk-${chunkIndex}-t-${i}`,
           startSec: t.startSec ?? nominalStartSec,
           endSec: t.endSec ?? Math.min(nominalEndSec, nominalStartSec + 30),
-          timestampStr: t.timestampStr || formatTime(t.startSec || nominalStartSec),
+          timestampStr: t.timestampStr || formatTimestamp(t.startSec || nominalStartSec, true),
           speaker: t.speaker || channelTitle || 'Speaker',
           text: t.text || '',
           chunkIndex,
@@ -820,7 +667,7 @@ Return strict JSON format:
       ? parsed.visualObservations.map((v: any, i: number) => ({
           id: `chunk-${chunkIndex}-v-${i}`,
           timestampSec: v.timestampSec ?? nominalStartSec,
-          timestampStr: v.timestampStr || formatTime(v.timestampSec || nominalStartSec),
+          timestampStr: v.timestampStr || formatTimestamp(v.timestampSec || nominalStartSec, true),
           type: v.type || 'demo',
           headline: v.headline || 'Visual Event',
           extractedTextOrCode: v.extractedTextOrCode || '',
@@ -843,43 +690,40 @@ Return strict JSON format:
       },
     });
   } catch (err: any) {
-    console.warn('Analyze chunk error:', err);
+    console.warn('Analyze chunk error:', sanitizeErrorMessage(err));
     const failure = errorResponse(err, 'Could not analyze this video segment. Please try again.');
     return res.status(failure.status).json({ error: failure.error });
   }
 });
 
 // 3.5 Unified Fast Full Notes Endpoint (Single-pass execution: 10-15s total)
-router.post('/gemini/generate-full-notes', async (req, res) => {
+router.post('/gemini/generate-full-notes', requireUserApiKey, async (req, res) => {
   try {
-    const {
-      videoUrl,
-      videoTitle,
-      channelTitle,
-      durationSec = 600,
-      creatorChapters = [],
-      videoDescription = '',
-      apiKey: bodyApiKey,
-    } = req.body;
+    const { videoUrl, videoTitle, channelTitle, videoDescription } = req.body;
+    const durationSec = Math.floor(clampNumber(req.body.durationSec, 1, 86400, 600));
+    const creatorChapters = Array.isArray(req.body.creatorChapters) ? req.body.creatorChapters.slice(0, 80) : [];
 
-    const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
-    getAiClient(userApiKey); // Validate BYOK before caption retrieval.
-    const durationFormatted = formatTime(durationSec);
-    const hasCreatorChapters = Array.isArray(creatorChapters) && creatorChapters.length > 1;
+    if (!extractYouTubeVideoId(videoUrl)) {
+      return res.status(400).json({ error: 'A valid YouTube video URL is required.' });
+    }
+
+    const durationFormatted = formatTimestamp(durationSec, true);
+    const hasCreatorChapters = creatorChapters.length > 1;
     const transcriptTarget = durationSec <= 600 ? '10 to 18' : durationSec <= 1800 ? '18 to 32' : durationSec <= 3600 ? '28 to 48' : '40 to 65';
 
     // 1. Attempt to fetch authentic official YouTube captions
     const videoId = extractYouTubeVideoId(videoUrl);
     let officialTranscript: any[] = [];
     if (videoId) {
+      let transcriptRequest: Promise<any[]> | undefined;
       try {
         const cachedCaptions = getCached(transcriptCache, videoId);
-        let transcriptRequest = inFlightTranscripts.get(videoId);
+        transcriptRequest = inFlightTranscripts.get(videoId);
         if (!cachedCaptions && !transcriptRequest) {
           transcriptRequest = YoutubeTranscript.fetchTranscript(videoId);
           inFlightTranscripts.set(videoId, transcriptRequest);
         }
-        const rawCaptions = cachedCaptions || await transcriptRequest;
+        const rawCaptions = cachedCaptions || (transcriptRequest ? await transcriptRequest : []);
         if (Array.isArray(rawCaptions) && rawCaptions.length > 0) {
           if (!cachedCaptions) setCached(transcriptCache, videoId, rawCaptions);
           officialTranscript = groupRawCaptions(rawCaptions, channelTitle || 'Speaker');
@@ -887,7 +731,10 @@ router.post('/gemini/generate-full-notes', async (req, res) => {
       } catch (_err) {
         // Captions disabled or unavailable on YouTube; Gemini will transcribe from the video
       } finally {
-        inFlightTranscripts.delete(videoId);
+        // Only clear the entry this request created; a concurrent request may own a newer one.
+        if (transcriptRequest && inFlightTranscripts.get(videoId) === transcriptRequest) {
+          inFlightTranscripts.delete(videoId);
+        }
       }
     }
 
@@ -931,7 +778,7 @@ If this video covers technical topics (programming, frameworks, software archite
    - Provide ${transcriptTarget} rich, detailed timestamped transcript entries covering every key technical milestone, code change, terminal output, and explanation across the video.
    - Do NOT leave long unexplained gaps between entries during an active tutorial.
 
-${hasCreatorChapters ? `Creator Chapters Provided:\n${JSON.stringify(creatorChapters, null, 2)}\n` : ''}
+${hasCreatorChapters ? `Creator Chapters Provided:\n${JSON.stringify(creatorChapters, null, 2).slice(0, 4000)}\n` : ''}
 ${videoDescription ? `Video Context / Description:\n"""\n${videoDescription.slice(0, 1000)}\n"""\n` : ''}
 ${transcriptExcerpt}
 
@@ -995,7 +842,7 @@ Return STRICT JSON:
 
     // Keep the video attached even when captions are available: captions cover
     // speech, but Gemini is also used here for on-screen text and visuals.
-    const genResult = await generateWithCascade(prompt, true, videoUrl, userApiKey);
+    const genResult = await generateWithCascade(prompt, true, videoUrl, res.locals.userApiKey);
     const parsed = cleanAndParseJson<any>(genResult.text);
 
     // If official captions were retrieved, use the 100% genuine transcript!
@@ -1009,45 +856,8 @@ Return STRICT JSON:
       hasOfficialTranscript,
     });
   } catch (err: any) {
-    console.warn('Generate full notes error:', err);
+    console.warn('Generate full notes error:', sanitizeErrorMessage(err));
     const failure = errorResponse(err, 'Could not generate notes for this video. Please try again.');
-    return res.status(failure.status).json({ error: failure.error });
-  }
-});
-
-// 4. Hierarchical Reduce Endpoint
-router.post('/gemini/hierarchical-reduce', async (req, res) => {
-  try {
-    const { videoUrl, videoTitle, channelTitle, durationSec, chapterSummaries, apiKey: bodyApiKey } = req.body;
-    const userApiKey = (req.headers['x-gemini-api-key'] as string) || bodyApiKey;
-    getAiClient(userApiKey);
-    const isShort = (durationSec || 600) <= 600;
-
-    const prompt = `
-You are finalizing the comprehensive summary for this video:
-Title: "${videoTitle}"
-Channel: "${channelTitle}"
-Duration: ${formatTime(durationSec || 600)}
-
-Here are the section notes compiled so far:
-${JSON.stringify(chapterSummaries, null, 2)}
-
-Task:
-${isShort ? 'Provide a crisp executive summary (2-3 sentences) and 2-3 key takeaways directly based on what occurred.' : 'Provide a clear executive summary (1 dense paragraph) and 3-5 key takeaways directly grounded in the chapters.'}
-
-Return JSON:
-{
-  "executiveSummary": "Direct, factual summary strictly of this video",
-  "keyTakeaways": ["Factual Takeaway 1", "Factual Takeaway 2"]
-}
-`;
-
-    const result = await generateWithCascade(prompt, true, videoUrl, userApiKey);
-    const parsed = cleanAndParseJson<any>(result.text);
-    return res.json(parsed);
-  } catch (err: any) {
-    console.warn('Hierarchical reduce error:', err);
-    const failure = errorResponse(err, 'Could not finish the summary. The notes can be regenerated safely.');
     return res.status(failure.status).json({ error: failure.error });
   }
 });
@@ -1055,6 +865,25 @@ Return JSON:
 // Mount router on both '/api' and '/'
 app.use('/api', router);
 app.use(router);
+
+// Unknown API paths must return JSON (never HTML), so clients get a clear error.
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'API endpoint not found.' });
+});
+
+// Central error handler: malformed JSON bodies and unexpected errors must stay
+// JSON-shaped; browsers surface HTML error pages as opaque CORS failures.
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = toFiniteNumber(err?.status ?? err?.statusCode, 500);
+  console.warn('API error handler:', sanitizeErrorMessage(err));
+  if (status === 413) {
+    return res.status(413).json({ error: 'Request payload too large. Please try a shorter video.' });
+  }
+  if (status === 400) {
+    return res.status(400).json({ error: 'Invalid request body.' });
+  }
+  return res.status(500).json({ error: 'Unexpected server error. Please retry.' });
+});
 
 export default app;
 export { app };
