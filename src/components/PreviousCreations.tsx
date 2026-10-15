@@ -503,12 +503,12 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   return (
     <section
       id="previous-creations"
-      className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-4 sm:p-5 shadow-xs transition-colors duration-150 space-y-4"
+      className="card p-4 sm:p-5 shadow-xs transition-colors duration-150 space-y-4"
     >
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-100 dark:border-zinc-800">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-900 dark:text-zinc-100 shrink-0">
+          <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
             <Clock className="w-4 h-4" />
           </div>
           <div>
@@ -517,7 +517,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                 Previous Creations
               </h2>
               {unifiedCreations.length > 0 && (
-                <span className="text-[11px] font-mono px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
                   {unifiedCreations.length}
                 </span>
               )}
@@ -541,7 +541,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                 type="button"
                 onClick={handleConnectDrive}
                 disabled={isLoading}
-                className="px-2.5 py-1.5 rounded-md text-xs font-mono flex items-center gap-1.5 transition touch-manipulation bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                className="btn px-2.5 py-1.5 text-xs bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
                 aria-label="Reconnect Google Drive"
               >
                 <HardDrive className="w-3.5 h-3.5" />
@@ -552,10 +552,10 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                 type="button"
                 onClick={() => loadDriveFiles(true)}
                 disabled={isSyncing}
-                className={`px-2.5 py-1.5 rounded-md text-xs font-mono flex items-center gap-1.5 transition touch-manipulation border border-zinc-200 dark:border-zinc-800 ${
+                className={`btn px-2.5 py-1.5 text-xs border border-zinc-300 dark:border-zinc-700 ${
                   isSyncing
                     ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed'
-                    : 'bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+                    : 'bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
                 }`}
                 aria-label="Sync creations from Google Drive"
               >
@@ -572,7 +572,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               type="button"
               onClick={handleConnectDrive}
               disabled={isLoading}
-              className="px-2.5 py-1.5 rounded-md text-xs font-mono flex items-center gap-1.5 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 transition"
+              className="btn px-2.5 py-1.5 text-xs bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/70"
             >
               <HardDrive className="w-3.5 h-3.5" />
               <span>Connect Drive</span>
@@ -598,15 +598,15 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       {unifiedCreations.length > 0 && (
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
           {/* Tabs */}
-          <div className="inline-flex rounded-md bg-zinc-100 dark:bg-zinc-800 p-0.5 text-xs font-mono">
+          <div className="inline-flex rounded-lg bg-zinc-100 dark:bg-zinc-800/80 p-1 text-xs font-mono">
             <button
               type="button"
               onClick={() => setActiveTab('all')}
               aria-pressed={activeTab === 'all'}
-              className={`px-2.5 py-1.5 rounded transition ${
+              className={`px-2.5 py-1.5 rounded-md transition ${
                 activeTab === 'all'
-                  ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium shadow-2xs'
-                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium shadow-xs'
+                  : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
               }`}
             >
               All ({unifiedCreations.length})
@@ -615,10 +615,10 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               type="button"
               onClick={() => setActiveTab('drive')}
               aria-pressed={activeTab === 'drive'}
-              className={`px-2.5 py-1.5 rounded transition flex items-center gap-1 ${
+              className={`px-2.5 py-1.5 rounded-md transition flex items-center gap-1 ${
                 activeTab === 'drive'
-                  ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium shadow-2xs'
-                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium shadow-xs'
+                  : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
               }`}
             >
               <Cloud className="w-3 h-3 text-blue-500" />
@@ -628,10 +628,10 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               type="button"
               onClick={() => setActiveTab('local')}
               aria-pressed={activeTab === 'local'}
-              className={`px-2.5 py-1.5 rounded transition flex items-center gap-1 ${
+              className={`px-2.5 py-1.5 rounded-md transition flex items-center gap-1 ${
                 activeTab === 'local'
-                  ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium shadow-2xs'
-                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium shadow-xs'
+                  : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
               }`}
             >
               <Laptop className="w-3 h-3 text-zinc-500" />
@@ -648,7 +648,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search creations..."
               aria-label="Search creations"
-              className="w-full pl-8 pr-3 py-2 sm:py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-base sm:text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400"
+              className="input pl-8 pr-3 py-2 sm:py-1.5 bg-zinc-50 dark:bg-zinc-950 font-mono text-base sm:text-xs"
             />
           </div>
         </div>
@@ -656,15 +656,15 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
 
       {/* Main Content Area */}
       {unifiedCreations.length === 0 ? (
-        <div className="py-8 px-4 text-center space-y-3.5 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50/50 dark:bg-zinc-950/40">
-          <div className="w-10 h-10 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 flex items-center justify-center mx-auto text-zinc-500">
-            <FileText className="w-5 h-5" />
+        <div className="py-10 px-4 text-center space-y-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/40">
+          <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
+            <FileText className="w-6 h-6" aria-hidden="true" />
           </div>
           <div className="space-y-1">
-            <h4 className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+            <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
               No saved creations yet
             </h4>
-            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed">
               When you generate notes for any YouTube video above, they will automatically be preserved here and can be exported directly to your Google Drive.
             </p>
           </div>
@@ -673,7 +673,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               type="button"
               onClick={handleConnectDrive}
               disabled={isLoading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-mono transition active:scale-95 cursor-pointer"
+              className="btn btn-primary px-3.5 py-2 text-xs"
             >
               <HardDrive className="w-3.5 h-3.5" />
               <span>Connect Drive for Cloud Backup</span>
@@ -699,7 +699,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               return (
                 <div
                   key={item.id}
-                  className="p-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/60 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-2xs transition-all duration-150 flex flex-col justify-between gap-2.5"
+                  className="p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/60 hover:border-zinc-300 dark:hover:border-zinc-700 hover:shadow-sm transition-all duration-150 flex flex-col justify-between gap-2.5"
                 >
                   {/* Top info */}
                   <div className="min-w-0">
@@ -762,7 +762,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                         <button
                           type="button"
                           onClick={() => setConfirmDeleteId(null)}
-                          className="px-2.5 py-1 rounded border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900"
+                          className="btn px-2.5 py-1 text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100"
                         >
                           Cancel
                         </button>
@@ -770,7 +770,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                           type="button"
                           onClick={() => handleDelete(item)}
                           disabled={isBusy}
-                          className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-700 text-white font-medium flex items-center gap-1 cursor-pointer"
+                          className="btn px-2.5 py-1 text-[11px] bg-rose-600 hover:bg-rose-700 text-white font-medium"
                         >
                           {isBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Confirm'}
                         </button>
@@ -783,7 +783,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                           type="button"
                           onClick={() => handleView(item)}
                           disabled={isBusy}
-                          className="px-2.5 py-1 rounded bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 text-xs font-mono font-medium transition flex items-center gap-1.5 touch-manipulation active:scale-95 disabled:opacity-50 cursor-pointer"
+                          className="btn btn-primary px-2.5 py-1 text-xs"
                         >
                           {isBusy && actionFileId === item.id ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
@@ -799,7 +799,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                             type="button"
                             onClick={() => handleSaveToDrive(item)}
                             disabled={isSavingDrive}
-                            className="px-2 py-1 rounded bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[11px] font-mono flex items-center gap-1 transition"
+                            className="btn px-2 py-1 text-[11px] bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/70"
                             title="Save copy to Google Drive"
                           >
                             {isSavingDrive ? (
@@ -817,7 +817,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                           type="button"
                           onClick={() => handleCopy(item)}
                           disabled={isBusy}
-                          className="p-2 rounded text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition active:scale-95"
+                          className="btn btn-ghost p-2"
                           aria-label="Copy markdown"
                           title="Copy markdown text"
                         >
@@ -832,7 +832,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                           type="button"
                           onClick={() => handleDownload(item)}
                           disabled={isBusy}
-                          className="p-2 rounded text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition active:scale-95"
+                          className="btn btn-ghost p-2"
                           aria-label="Download markdown"
                           title="Download .md file"
                         >
@@ -843,7 +843,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                           type="button"
                           onClick={() => setConfirmDeleteId(item.id)}
                           disabled={isBusy}
-                          className="p-2 rounded text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition active:scale-95"
+                          className="btn btn-danger p-2"
                           aria-label="Delete note"
                           title="Delete note"
                         >
@@ -870,7 +870,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
 
       <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800/80 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs font-mono text-zinc-500 dark:text-zinc-400">
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
             <Database className="w-3.5 h-3.5 text-zinc-500" />
             <span>Storage: {storageStats.formattedUsed}</span>
             <span className="text-zinc-400 dark:text-zinc-500">({storageStats.itemCount} {storageStats.itemCount === 1 ? 'note' : 'notes'})</span>
@@ -893,7 +893,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
             <button
               type="button"
               onClick={handlePruneSynced}
-              className="px-2 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 transition flex items-center gap-1 border border-zinc-200 dark:border-zinc-700/60"
+              className="btn btn-secondary px-2.5 py-1 text-[11px]"
               title="Frees local storage by trimming cache of notes already backed up in Google Drive"
             >
               <Sparkles className="w-3 h-3 text-amber-500" />
@@ -905,7 +905,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
             type="button"
             onClick={handleExportBackup}
             disabled={unifiedCreations.length === 0}
-            className="px-2 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition flex items-center gap-1 border border-zinc-200 dark:border-zinc-700/60 disabled:opacity-40"
+            className="btn btn-secondary px-2.5 py-1 text-[11px]"
             title="Download complete JSON backup of all creations"
           >
             <FileDown className="w-3 h-3" />
@@ -915,7 +915,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="px-2 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 transition flex items-center gap-1 border border-zinc-200 dark:border-zinc-700/60"
+            className="btn btn-secondary px-2.5 py-1 text-[11px]"
             title="Import creations from a JSON backup file (e.g. migrate between local and Vercel)"
           >
             <FileUp className="w-3 h-3" />

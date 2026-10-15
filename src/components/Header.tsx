@@ -1,6 +1,6 @@
 import React from 'react';
 import { User } from 'firebase/auth';
-import { LogOut, HardDrive, Sun, Moon, Key, AlertCircle, X } from 'lucide-react';
+import { LogOut, HardDrive, Sun, Moon, Key, AlertCircle, X, FileText } from 'lucide-react';
 import { googleSignIn, logout, formatAuthError } from '../services/firebase';
 
 interface HeaderProps {
@@ -57,18 +57,18 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 sticky top-0 z-40 transition-colors">
+    <header className="bg-white/85 dark:bg-zinc-950/85 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 sticky top-0 z-40 transition-colors">
       <div className="max-w-4xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-1.5 sm:gap-2">
-        {/* Brand: Pure Utilitarian Tool Identity */}
-        <div className="flex items-center space-x-2 shrink-0">
-          <div className="w-7 h-7 rounded border border-zinc-900 dark:border-zinc-100 bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center font-mono text-[11px] font-bold text-white dark:text-zinc-950">
-            MD
+        {/* Brand */}
+        <div className="flex items-center space-x-2.5 shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0 shadow-xs">
+            <FileText className="w-4 h-4 text-white" aria-hidden="true" />
           </div>
           <div className="flex items-baseline space-x-1.5">
-            <span className="font-semibold text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 tracking-tight">
+            <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 tracking-tight">
               yt-to-markdown
             </span>
-            <span className="hidden sm:inline text-[11px] font-mono text-zinc-400 dark:text-zinc-500">
+            <span className="hidden sm:inline text-[10px] font-mono text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 rounded px-1 py-px">
               v1.2.0
             </span>
           </div>
@@ -79,10 +79,8 @@ export const Header: React.FC<HeaderProps> = ({
           {/* API Key configuration button */}
           <button
             onClick={onOpenApiKeyModal}
-            className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 min-h-[40px] rounded-md text-xs font-mono transition border touch-manipulation active:scale-95 ${
-              apiKeyCount > 0
-                ? 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60'
+            className={`btn px-3 py-1.5 min-h-[40px] text-xs ${
+              apiKeyCount > 0 ? 'btn-secondary' : 'btn-primary'
             }`}
             title="Configure your Gemini API key"
             aria-label="Configure Gemini API key"
@@ -95,7 +93,7 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
             <span
               className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                apiKeyCount > 0 ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'
+                apiKeyCount > 0 ? 'bg-emerald-500' : 'bg-white/90 animate-pulse'
               }`}
             />
           </button>
@@ -103,16 +101,16 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Dark Mode */}
           <button
             onClick={onToggleDarkMode}
-            className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-transparent hover:border-zinc-200 dark:hover:border-zinc-800 transition touch-manipulation active:scale-95"
+            className="btn btn-ghost p-2 min-h-[40px] min-w-[40px]"
             title={darkMode ? 'Light mode' : 'Dark mode'}
             aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
           >
-            {darkMode ? <Sun className="w-4 h-4 text-zinc-300" /> : <Moon className="w-4 h-4 text-zinc-600" />}
+            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
           {/* Google Drive Connect */}
           {user ? (
-            <div className="flex items-center space-x-1 sm:space-x-1.5 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md py-1 px-1.5 sm:px-2 text-xs min-h-[40px]">
+            <div className="flex items-center space-x-1 sm:space-x-1.5 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg pl-2.5 pr-1 py-1 text-xs min-h-[40px]">
               <span className="hidden min-[360px]:inline-block font-mono text-zinc-700 dark:text-zinc-300 truncate max-w-[64px] sm:max-w-[110px] text-[11px] sm:text-xs">
                 {user.email?.split('@')[0]}
               </span>
@@ -121,7 +119,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   onClick={onOpenDriveModal}
                   disabled={!hasReport}
-                  className="px-1.5 py-1 text-[11px] font-mono rounded bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-1 transition touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn btn-ghost px-2 py-1 text-[11px]"
                   title={
                     hasReport
                       ? 'Google Drive export destination'
@@ -129,14 +127,14 @@ export const Header: React.FC<HeaderProps> = ({
                   }
                   aria-label="Google Drive export destination"
                 >
-                  <HardDrive className="w-3 h-3 text-zinc-600 dark:text-zinc-400" />
+                  <HardDrive className="w-3 h-3" />
                   <span className="hidden sm:inline">Drive</span>
                 </button>
               )}
 
               <button
                 onClick={handleSignOut}
-                className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 p-1 rounded transition touch-manipulation"
+                className="btn btn-ghost p-1.5"
                 title="Disconnect"
                 aria-label="Disconnect Google account"
               >
@@ -147,11 +145,11 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={handleSignIn}
               disabled={isSigningIn}
-              className="inline-flex items-center justify-center border border-zinc-300 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 px-2.5 py-1.5 min-h-[40px] rounded-md text-xs font-mono text-zinc-700 dark:text-zinc-300 transition active:scale-95 disabled:opacity-50 touch-manipulation"
+              className="btn btn-secondary px-3 py-1.5 min-h-[40px] text-xs"
               title="Connect Google Drive to export notes directly"
               aria-label="Connect Google Drive"
             >
-              <HardDrive className="w-3.5 h-3.5 sm:mr-1.5 text-zinc-500 shrink-0" />
+              <HardDrive className="w-3.5 h-3.5 sm:mr-0.5 text-zinc-500 shrink-0" />
               <span className="hidden sm:inline">{isSigningIn ? 'Connecting...' : 'Connect Drive'}</span>
             </button>
           )}

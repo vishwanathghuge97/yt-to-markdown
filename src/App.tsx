@@ -949,20 +949,22 @@ export default function App() {
         <h1 className="sr-only">yt-to-markdown — convert YouTube videos into Markdown notes</h1>
 
         {/* URL Input Form */}
-        <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3.5 sm:p-4 shadow-sm transition-colors">
+        <div className="card p-3.5 sm:p-4 shadow-xs transition-colors">
           <form onSubmit={handleStartAnalysis} className="space-y-3">
             {!customApiKey && (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200">
-                <div className="flex items-start sm:items-center gap-2">
-                  <Key className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-lg bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/70 text-xs text-blue-900 dark:text-blue-200">
+                <div className="flex items-start sm:items-center gap-2.5">
+                  <span className="w-6 h-6 rounded-md bg-blue-600 text-white flex items-center justify-center shrink-0">
+                    <Key className="w-3.5 h-3.5" aria-hidden="true" />
+                  </span>
                   <span>
-                    <strong>Bring Your Own Key (BYOK):</strong> Please provide your free Google Gemini API key to generate notes.
+                    <strong className="font-semibold">Bring Your Own Key (BYOK):</strong> Please provide your free Google Gemini API key to generate notes.
                   </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setIsApiKeyModalOpen(true)}
-                  className="px-3 py-1.5 min-h-[36px] sm:min-h-0 text-xs font-mono font-medium rounded bg-amber-600 hover:bg-amber-700 text-white transition shrink-0 self-start sm:self-auto shadow-xs touch-manipulation"
+                  className="btn btn-primary px-3 py-1.5 min-h-[36px] sm:min-h-0 text-xs shrink-0 self-start sm:self-auto"
                 >
                   Enter Free Key
                 </button>
@@ -970,7 +972,7 @@ export default function App() {
             )}
 
             {inputError && (
-              <div className="flex items-start sm:items-center justify-between gap-3 p-2.5 rounded-md bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-300 text-xs font-mono">
+              <div className="flex items-start sm:items-center justify-between gap-3 p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-300 text-xs font-mono">
                 <div className="flex items-start gap-2 min-w-0">
                   <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5 sm:mt-0" />
                   <span>{inputError}</span>
@@ -979,7 +981,7 @@ export default function App() {
                   <button
                     type="submit"
                     onClick={() => setInputError('')}
-                    className="shrink-0 px-2.5 py-1.5 rounded border border-rose-300 dark:border-rose-800 bg-white/70 dark:bg-rose-950/50 hover:bg-white dark:hover:bg-rose-900 text-rose-800 dark:text-rose-200 text-[11px] font-semibold transition"
+                    className="btn shrink-0 px-2.5 py-1.5 rounded-md border border-rose-300 dark:border-rose-800 bg-white/70 dark:bg-rose-950/50 hover:bg-white dark:hover:bg-rose-900 text-rose-800 dark:text-rose-200 text-[11px] font-semibold"
                   >
                     Retry
                   </button>
@@ -1003,7 +1005,7 @@ export default function App() {
                       if (inputError) setInputError('');
                     }}
                     placeholder="Paste YouTube link (e.g. youtube.com/watch?v=...)"
-                    className="w-full pl-3.5 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-md text-base sm:text-sm font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400 min-h-[44px]"
+                    className="input pl-3.5 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 font-mono text-base sm:text-sm min-h-[44px]"
                     disabled={isAnalyzing}
                   />
 
@@ -1013,7 +1015,7 @@ export default function App() {
                         type="button"
                         onClick={() => setCurrentUrl('')}
                         aria-label="Clear URL"
-                        className="p-1.5 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition touch-manipulation cursor-pointer"
+                        className="btn btn-ghost p-1.5"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -1028,7 +1030,7 @@ export default function App() {
                   <button
                     type="button"
                     disabled
-                    className="flex-1 sm:flex-initial px-4 py-2.5 min-h-[44px] bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 rounded-md text-sm font-medium transition flex items-center justify-center gap-2 font-mono shadow-xs opacity-90"
+                    className="btn btn-primary flex-1 sm:flex-initial px-4 py-2.5 min-h-[44px] text-sm font-mono disabled:opacity-90"
                   >
                     <RefreshCw className="w-4 h-4 animate-spin" />
                     <span>Processing...</span>
@@ -1036,7 +1038,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleCancelAnalysis}
-                    className="px-3.5 py-2.5 min-h-[44px] border border-rose-300 dark:border-rose-900 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 rounded-md text-xs font-mono font-medium transition flex items-center justify-center gap-1.5 touch-manipulation active:scale-[0.98]"
+                    className="btn px-3.5 py-2.5 min-h-[44px] border border-rose-200 dark:border-rose-900/70 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 text-xs"
                     title="Stop analysis"
                   >
                     <Square className="w-3.5 h-3.5 fill-current" />
@@ -1047,7 +1049,7 @@ export default function App() {
                 <button
                   type="submit"
                   disabled={!currentUrl.trim()}
-                  className="w-full sm:w-auto px-5 py-2.5 min-h-[44px] bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-950 rounded-md text-sm font-medium transition flex items-center justify-center gap-2 disabled:opacity-40 shrink-0 font-mono shadow-xs touch-manipulation active:scale-[0.98]"
+                  className="btn btn-primary w-full sm:w-auto px-5 py-2.5 min-h-[44px] text-sm font-mono shrink-0"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
                   <span>Generate .md</span>
@@ -1059,7 +1061,7 @@ export default function App() {
 
         {/* Real-time Visual Progress Indicator */}
         {isAnalyzing && (
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3.5 sm:p-4 space-y-3.5 shadow-sm transition-colors">
+          <div className="card p-3.5 sm:p-4 space-y-3.5 shadow-xs transition-colors">
             {/* Header / Active status line */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-zinc-100 dark:border-zinc-800/80">
               <div className="space-y-1 min-w-0 flex-1">
@@ -1125,7 +1127,7 @@ export default function App() {
                 className="w-full bg-zinc-100 dark:bg-zinc-800 h-2 rounded-full overflow-hidden"
               >
                 <div
-                  className={`bg-zinc-900 dark:bg-zinc-100 h-full transition-all duration-300 ${isSinglePassAnalysis ? 'w-1/3 animate-pulse' : ''}`}
+                  className={`bg-blue-600 dark:bg-blue-500 h-full transition-all duration-300 ${isSinglePassAnalysis ? 'w-1/3 animate-pulse' : ''}`}
                   style={isSinglePassAnalysis ? undefined : { width: `${progressPercent}%` }}
                 />
               </div>
@@ -1147,9 +1149,9 @@ export default function App() {
                     return (
                       <div
                         key={idx}
-                        className={`p-2 rounded border text-xs font-mono flex items-center justify-between transition-colors ${
+                        className={`p-2 rounded-lg border text-xs font-mono flex items-center justify-between transition-colors ${
                           isCurrent
-                            ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-100 dark:bg-zinc-800 font-semibold'
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200 font-semibold'
                             : isDone
                             ? 'border-zinc-200 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-900/40 text-zinc-600 dark:text-zinc-400'
                             : isFailed
@@ -1160,7 +1162,7 @@ export default function App() {
                         <span className="truncate">
                           #{idx + 1} {formatTimestamp(chunk.nominalStartSec)} - {formatTimestamp(chunk.nominalEndSec)}
                         </span>
-                        {isCurrent && <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 ml-1.5 text-zinc-900 dark:text-zinc-100" />}
+                        {isCurrent && <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 ml-1.5 text-blue-600 dark:text-blue-400" />}
                         {isDone && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 ml-1.5" />}
                         {isFailed && <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 ml-1.5" />}
                       </div>
@@ -1207,16 +1209,16 @@ export default function App() {
             onOpenDriveModal={() => setIsDriveModalOpen(true)}
           />
         ) : !isAnalyzing && (
-          <div className="border border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg p-6 sm:p-8 text-center space-y-3">
-            <div className="w-10 h-10 rounded-md bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center mx-auto text-zinc-500">
-              <FileText className="w-5 h-5" />
+          <div className="card p-8 sm:p-10 text-center space-y-4 shadow-xs">
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
+              <FileText className="w-6 h-6" aria-hidden="true" />
             </div>
             <div className="space-y-1">
               <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 Generate Markdown from YouTube
               </h2>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto">
-                Paste a YouTube video link above and click Generate .md to export notes.
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed">
+                Paste a YouTube video link above and click <span className="font-medium text-zinc-700 dark:text-zinc-300">Generate .md</span> to export notes.
               </p>
             </div>
           </div>

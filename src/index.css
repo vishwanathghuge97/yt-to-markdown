@@ -41,12 +41,45 @@
   /* Consistent, visible keyboard focus ring. Text inputs keep their own
      focus:ring styles. */
   :where(button, a, summary):focus-visible {
-    outline: 2px solid var(--color-zinc-900);
+    outline: 2px solid var(--color-blue-600);
     outline-offset: 2px;
   }
 
   :where(.dark) :where(button, a, summary):focus-visible {
-    outline-color: var(--color-zinc-100);
+    outline-color: var(--color-blue-400);
+  }
+}
+
+/* Shared surface + control primitives. Every card, button and text field in
+   the app builds on these so radii, borders, focus treatment and hover states
+   stay identical everywhere. Sizes/padding remain inline per usage. */
+@layer components {
+  .card {
+    @apply bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 font-medium rounded-lg transition-colors select-none touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 shadow-xs;
+  }
+
+  .btn-secondary {
+    @apply bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100;
+  }
+
+  .btn-ghost {
+    @apply text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100;
+  }
+
+  .btn-danger {
+    @apply text-zinc-400 dark:text-zinc-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-600 dark:hover:text-rose-400;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 transition-colors focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25;
   }
 }
 

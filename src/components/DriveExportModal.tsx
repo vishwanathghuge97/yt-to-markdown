@@ -113,7 +113,7 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="anim-panel-in bg-white dark:bg-zinc-900 rounded-xl sm:rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto overscroll-contain border border-zinc-200 dark:border-zinc-800 shadow-2xl flex flex-col transition-colors"
+        className="anim-panel-in card rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto overscroll-contain shadow-2xl flex flex-col transition-colors"
         role="dialog"
         aria-modal="true"
         aria-label="Save to Google Drive"
@@ -230,7 +230,7 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
         <div className="px-4 sm:px-6 py-3 sm:py-4 bg-zinc-50 dark:bg-zinc-800/60 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-end gap-2.5">
           <button
             onClick={onClose}
-            className="px-3.5 py-2 min-h-[44px] border border-zinc-300 dark:border-zinc-700 rounded-lg text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition touch-manipulation"
+            className="btn btn-secondary px-3.5 py-2 min-h-[44px] text-xs"
           >
             Cancel
           </button>
@@ -238,7 +238,7 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
           <button
             onClick={handleConfirmExport}
             disabled={isExporting}
-            className="px-4 py-2 min-h-[44px] bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-xs font-semibold transition flex items-center gap-2 shadow-xs disabled:opacity-50 touch-manipulation"
+            className="btn btn-primary px-4 py-2 min-h-[44px] text-xs font-semibold"
           >
             {isExporting ? (
               <>

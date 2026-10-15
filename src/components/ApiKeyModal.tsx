@@ -71,12 +71,12 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-label="Gemini API key settings"
-        className="anim-panel-in bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl max-w-md w-full max-h-[90dvh] overflow-y-auto overscroll-contain shadow-2xl"
+        className="anim-panel-in card rounded-2xl max-w-md w-full max-h-[90dvh] overflow-y-auto overscroll-contain shadow-2xl"
       >
         {/* Header */}
         <div className="px-5 py-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center">
               <Key className="w-4 h-4" />
             </div>
             <div>
@@ -145,7 +145,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                       spellCheck={false}
                       autoComplete="off"
                       data-autofocus={index === 0 ? true : undefined}
-                      className="w-full pl-3 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-lg text-base sm:text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-400"
+                      className="input pl-3 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-950 font-mono text-base sm:text-xs"
                       aria-label={`Gemini API key ${index + 1}`}
                     />
                     <button
@@ -185,7 +185,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
               Storage Preference:
             </label>
             <div className="grid grid-cols-2 gap-2 text-xs">
-              <label className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition ${!persistLocally ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-100/70 dark:bg-zinc-800/60 font-medium text-zinc-900 dark:text-zinc-100' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/40'}`}>
+              <label className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition ${!persistLocally ? 'border-blue-500 bg-blue-50/60 dark:bg-blue-950/30 text-zinc-900 dark:text-zinc-100' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/40'}`}>
                 <input
                   type="radio"
                   name="storage_mode"
@@ -199,7 +199,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                 </div>
               </label>
 
-              <label className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition ${persistLocally ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-100/70 dark:bg-zinc-800/60 font-medium text-zinc-900 dark:text-zinc-100' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/40'}`}>
+              <label className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition ${persistLocally ? 'border-blue-500 bg-blue-50/60 dark:bg-blue-950/30 text-zinc-900 dark:text-zinc-100' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/40'}`}>
                 <input
                   type="radio"
                   name="storage_mode"
@@ -250,13 +250,13 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-2 text-xs font-mono rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+              className="btn btn-secondary px-3.5 py-2 text-xs"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-mono font-medium rounded-lg bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-950 transition shadow-xs"
+              className="btn btn-primary px-4 py-2 text-xs"
             >
               Save Key
             </button>
