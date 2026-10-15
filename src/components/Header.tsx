@@ -59,7 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="bg-white/85 dark:bg-zinc-950/85 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 sticky top-0 z-40 transition-colors">
-      <div className="max-w-4xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-1.5 sm:gap-2">
+      <div className="max-w-4xl sm:max-w-5xl 2xl:max-w-6xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-1.5 sm:gap-2">
         {/* Brand */}
         <div className="flex items-center space-x-2.5 shrink-0">
           <BrandMark className="w-8 h-8 rounded-lg shadow-xs shrink-0" />

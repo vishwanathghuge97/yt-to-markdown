@@ -513,7 +513,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
                 Previous Creations
               </h2>
               {unifiedCreations.length > 0 && (
@@ -522,7 +522,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                 </span>
               )}
             </div>
-            <p className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400">
+            <p className="text-xs font-mono text-zinc-500 dark:text-zinc-400">
               Persistent storage in browser and synchronized with Google Drive
             </p>
           </div>
@@ -587,7 +587,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
           <div className="space-y-1">
             <p className="font-semibold">{authErrorMessage}</p>
-            <p className="text-[11px] text-amber-700 dark:text-amber-300">
+            <p className="text-xs text-amber-700 dark:text-amber-300">
               Note: Your local creations remain completely safe and accessible below even if Google Drive authorization is pending.
             </p>
           </div>
@@ -598,7 +598,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       {unifiedCreations.length > 0 && (
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
           {/* Tabs */}
-          <div className="inline-flex flex-wrap rounded-lg bg-zinc-100 dark:bg-zinc-800/80 p-1 text-xs font-mono">
+          <div className="inline-flex flex-wrap rounded-lg bg-zinc-100 dark:bg-zinc-800/80 p-1 text-xs sm:text-[13px] font-mono">
             <button
               type="button"
               onClick={() => setActiveTab('all')}
@@ -648,7 +648,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search creations..."
               aria-label="Search creations"
-              className="input pl-8 pr-3 py-2 sm:py-1.5 min-h-[40px] sm:min-h-[32px] bg-zinc-50 dark:bg-zinc-950 font-mono text-base sm:text-xs"
+              className="input pl-8 pr-3 py-2 sm:py-1.5 min-h-[40px] sm:min-h-[32px] bg-zinc-50 dark:bg-zinc-950 font-mono text-base sm:text-[13px]"
             />
           </div>
         </div>
@@ -705,7 +705,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                   <div className="min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <h4
-                        className="text-xs font-mono font-medium text-zinc-900 dark:text-zinc-100 truncate flex-1"
+                        className="text-sm font-mono font-medium text-zinc-900 dark:text-zinc-100 truncate flex-1"
                         title={item.title}
                       >
                         {item.title}
@@ -737,7 +737,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 text-[11px] font-mono text-zinc-400 mt-1">
+                    <div className="flex items-center gap-1.5 text-xs font-mono text-zinc-400 mt-1">
                       {item.channelTitle && (
                         <>
                           <span className="truncate max-w-[120px] text-zinc-500 dark:text-zinc-400">
@@ -754,7 +754,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
 
                   {/* Actions */}
                   {isConfirmingDelete ? (
-                    <div className="flex items-center justify-between pt-1 border-t border-zinc-100 dark:border-zinc-800/80 text-[11px] font-mono">
+                    <div className="flex items-center justify-between pt-1 border-t border-zinc-100 dark:border-zinc-800/80 text-xs font-mono">
                       <span className="text-rose-600 dark:text-rose-400 font-medium">
                         Delete note?
                       </span>
@@ -762,7 +762,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                         <button
                           type="button"
                           onClick={() => setConfirmDeleteId(null)}
-                          className="btn px-2.5 py-1 min-h-[40px] sm:min-h-[32px] text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100"
+                          className="btn px-2.5 py-1 min-h-[40px] sm:min-h-[32px] text-xs border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100"
                         >
                           Cancel
                         </button>
@@ -770,7 +770,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                           type="button"
                           onClick={() => handleDelete(item)}
                           disabled={isBusy}
-                          className="btn px-2.5 py-1 min-h-[40px] sm:min-h-[32px] text-[11px] bg-rose-600 hover:bg-rose-700 text-white font-medium"
+                          className="btn px-2.5 py-1 min-h-[40px] sm:min-h-[32px] text-xs bg-rose-600 hover:bg-rose-700 text-white font-medium"
                         >
                           {isBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Confirm'}
                         </button>
@@ -799,7 +799,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                             type="button"
                             onClick={() => handleSaveToDrive(item)}
                             disabled={isSavingDrive}
-                            className="btn px-2 py-1 min-h-[40px] sm:min-h-[32px] text-[11px] bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/70"
+                            className="btn px-2 py-1 min-h-[40px] sm:min-h-[32px] text-xs bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/70"
                             title="Save copy to Google Drive"
                           >
                             {isSavingDrive ? (
@@ -876,13 +876,13 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
             <span className="text-zinc-400 dark:text-zinc-500">({storageStats.itemCount} {storageStats.itemCount === 1 ? 'note' : 'notes'})</span>
           </div>
 
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 text-[11px]">
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 text-xs">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
             <span>IndexedDB Durable Engine: Active</span>
           </div>
 
           {storageStats.status === 'near_limit' && (
-            <span className="px-2 py-1 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[11px]">
+            <span className="px-2 py-1 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-xs">
               LocalStorage near 5MB limit
             </span>
           )}
@@ -893,7 +893,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
             <button
               type="button"
               onClick={handlePruneSynced}
-              className="btn btn-secondary px-2.5 py-1 min-h-[40px] sm:min-h-[32px] whitespace-nowrap text-[11px]"
+              className="btn btn-secondary px-2.5 py-1 min-h-[40px] sm:min-h-[32px] whitespace-nowrap text-xs"
               title="Frees local storage by trimming cache of notes already backed up in Google Drive"
             >
               <Sparkles className="w-3 h-3 text-amber-500" />

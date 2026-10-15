@@ -944,7 +944,7 @@ export default function App() {
       />
 
       {/* 2. Main Content */}
-      <main className="flex-1 max-w-4xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
+      <main className="flex-1 w-full max-w-4xl sm:max-w-5xl 2xl:max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
         <h1 className="sr-only">yt-to-markdown — convert YouTube videos into Markdown notes</h1>
 
         {/* URL Input Form */}
@@ -1217,6 +1217,12 @@ export default function App() {
           lastGeneratedTime={report?.generatedAt ? new Date(report.generatedAt).getTime() : 0}
         />
       </main>
+
+      <footer className="w-full max-w-4xl sm:max-w-5xl 2xl:max-w-6xl mx-auto px-3 sm:px-6 pt-1 pb-5 sm:pb-6">
+        <p className="text-center text-xs text-zinc-400 dark:text-zinc-600">
+          Notes stay in your browser or your own Google Drive.
+        </p>
+      </footer>
 
       {/* Google Drive Export Modal */}
       {report && (
