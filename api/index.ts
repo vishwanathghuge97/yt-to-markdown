@@ -83,6 +83,9 @@ const GEMINI_HTTP_TIMEOUT_MS = 13_000;
 const CALL_RETRY_DELAY_MS = 1_200;
 const FETCH_TIMEOUT_MS = 3_500;
 const MAX_JSON_BODY_SIZE = '4mb'; // below Vercel's ~4.5MB request body limit
+// Title/description text like "The first 20 hours" is a topic, not a length.
+// Only short, plausible duration claims are trusted as a last resort.
+const MAX_TITLE_DURATION_HINT_SEC = 4 * 3600;
 const GEMINI_USER_AGENT = 'yt-to-markdown/1.2 (+https://yt-to-markdown.vercel.app)';
 
 // Warm Vercel instances can reuse these results across retries and repeated
@@ -139,6 +142,88 @@ async function fetchWithTimeout(
     return await fetch(input, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * Extracts "00:00 Intro"-style chapter markers from a video description.
+ * Used for both the watch-page scrape and the innertube player metadata so
+ * either source produces identical chapter lists.
+ */
+function extractChaptersFromDescription(
+  description: string,
+  maxDurationSec: number
+): { startSec: number; title: string }[] {
+  const chapters: { startSec: number; title: string }[] = [];
+  const timeRegex = /(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\s*[-–—:]?\s*([^\n\r<\\"]+)/g;
+  let m;
+  while ((m = timeRegex.exec(description)) !== null) {
+    const h = m[1] ? parseInt(m[1], 10) : 0;
+    const mins = parseInt(m[2], 10);
+    const s = parseInt(m[3], 10);
+    const totalSec = h * 3600 + mins * 60 + s;
+    const chapTitle = m[4].trim().replace(/^[-–—:]\s*/, '').slice(0, 80);
+    if (
+      chapTitle.length >= 2 &&
+      chapTitle.length < 75 &&
+      !chapTitle.includes('http') &&
+      !chapTitle.toLowerCase().includes('subscribe') &&
+      (!maxDurationSec || totalSec <= maxDurationSec) &&
+      !chapters.some((c) => c.startSec === totalSec)
+    ) {
+      chapters.push({ startSec: totalSec, title: chapTitle });
+    }
+  }
+  chapters.sort((a, b) => a.startSec - b.startSec);
+  return chapters;
+}
+
+interface PlayerInfo {
+  title?: string;
+  author?: string;
+  durationSec?: number;
+  description?: string;
+  unavailable?: boolean;
+}
+
+/**
+ * Reads video metadata from YouTube's internal "innertube" player endpoint,
+ * the same public WEB client the watch page itself calls. Unlike HTML
+ * scraping it keeps working from bot-blocked datacenter IPs and always carries
+ * the exact `lengthSeconds` that the chunk planner depends on.
+ */
+async function fetchPlayerInfo(videoId: string): Promise<PlayerInfo | null> {
+  try {
+    const res = await fetchWithTimeout('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      body: JSON.stringify({
+        videoId,
+        context: { client: { clientName: 'WEB', clientVersion: '2.20240501.00.00', hl: 'en' } },
+      }),
+    });
+    if (!res.ok) return null;
+    const data: any = await res.json();
+    const status = data?.playabilityStatus?.status;
+    const details = data?.videoDetails;
+    if (!details) {
+      return status === 'ERROR' ? { unavailable: true } : null;
+    }
+    const length = parseInt(String(details.lengthSeconds ?? ''), 10);
+    return {
+      title: typeof details.title === 'string' ? details.title : undefined,
+      author: typeof details.author === 'string' ? details.author : undefined,
+      durationSec: Number.isFinite(length) && length > 0 ? length : undefined,
+      description: typeof details.shortDescription === 'string' ? details.shortDescription : undefined,
+    };
+  } catch (err) {
+    console.warn('Player info fetch error:', err);
+    return null;
   }
 }
 
@@ -394,6 +479,10 @@ router.get('/youtube/info', async (req, res) => {
       return null;
     });
 
+    // Innertube player metadata runs in parallel; it is the authoritative
+    // duration source when the watch page is bot-blocked or truncated.
+    const playerInfoPromise = fetchPlayerInfo(videoId);
+
     // Step 1: Fetch oEmbed for pristine title and channel name
     try {
       const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}&format=json`;
@@ -419,12 +508,17 @@ router.get('/youtube/info', async (req, res) => {
           isUnavailable = true;
         }
 
-        // Method A: Check lengthSeconds or approxDurationMs directly in player response
-        const lengthMatch = html.match(/"lengthSeconds":"(\d+)"/i) || html.match(/"approxDurationMs":"(\d+)"/i);
+        // Method A: player response embedded in the page. `lengthSeconds` is
+        // seconds; `approxDurationMs` is only a fallback and is milliseconds.
+        const lengthMatch = html.match(/"lengthSeconds":"(\d+)"/i);
         if (lengthMatch) {
           const raw = parseInt(lengthMatch[1], 10);
-          if (raw > 0) {
-            durationSec = html.includes('"approxDurationMs"') && raw > 1000 ? Math.floor(raw / 1000) : raw;
+          if (raw > 0) durationSec = raw;
+        } else {
+          const approxMatch = html.match(/"approxDurationMs":"(\d+)"/i);
+          if (approxMatch) {
+            const approxMs = parseInt(approxMatch[1], 10);
+            if (approxMs > 1000) durationSec = Math.floor(approxMs / 1000);
           }
         }
 
@@ -465,33 +559,24 @@ router.get('/youtube/info', async (req, res) => {
         if (descMatch) {
           description = descMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
         }
-
-        // Chapters/timestamps match in description
-        if (description) {
-          const timeRegex = /(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\s*[-–—:]?\s*([^\n\r<\\"]+)/g;
-          let m;
-          while ((m = timeRegex.exec(description)) !== null) {
-            const h = m[1] ? parseInt(m[1], 10) : 0;
-            const mins = parseInt(m[2], 10);
-            const s = parseInt(m[3], 10);
-            const totalSec = h * 3600 + mins * 60 + s;
-            const chapTitle = m[4].trim().replace(/^[-–—:]\s*/, '').slice(0, 80);
-            if (
-              chapTitle.length >= 2 &&
-              chapTitle.length < 75 &&
-              !chapTitle.includes('http') &&
-              !chapTitle.toLowerCase().includes('subscribe') &&
-              (!durationSec || totalSec <= durationSec) &&
-              !creatorChapters.some((c) => c.startSec === totalSec)
-            ) {
-              creatorChapters.push({ startSec: totalSec, title: chapTitle });
-            }
-          }
-          creatorChapters.sort((a, b) => a.startSec - b.startSec);
-        }
       }
     } catch (err) {
       console.warn('Page scraper error:', err);
+    }
+
+    // Step 2b: Merge innertube player metadata for anything the scrape missed.
+    const playerInfo = await playerInfoPromise;
+    if (playerInfo) {
+      if (title === 'YouTube Video' && playerInfo.title) title = playerInfo.title;
+      if (author === 'Presenter' && playerInfo.author) author = playerInfo.author;
+      if ((!durationSec || durationSec <= 0) && playerInfo.durationSec) durationSec = playerInfo.durationSec;
+      if (!description && playerInfo.description) description = playerInfo.description;
+      if (playerInfo.unavailable) isUnavailable = true;
+    }
+
+    // Chapters/timestamps from whichever description we ended up with.
+    if (description && creatorChapters.length === 0) {
+      creatorChapters.push(...extractChaptersFromDescription(description, durationSec));
     }
 
     // If both oEmbed and page scrape failed or video is unavailable, return error
@@ -501,44 +586,55 @@ router.get('/youtube/info', async (req, res) => {
       });
     }
 
-    // Step 3: If duration is still 0 or undetermined, parse title/description hints or default
-    let durationEstimated = false;
-    if (!durationSec || durationSec === 0) {
-      durationEstimated = true;
-      const fullText = `${title} ${description}`;
-      const hourMatch = fullText.match(/\b(\d+)\s*(?:hours?|hrs?|h)\b/i);
-      const minMatch = fullText.match(/\b(\d+)\s*(?:minutes?|mins?|m)\b/i);
-      let extractedSec = 0;
-      if (hourMatch) extractedSec += parseInt(hourMatch[1], 10) * 3600;
-      if (minMatch) extractedSec += parseInt(minMatch[1], 10) * 60;
-
-      if (extractedSec > 0 && extractedSec < 86400) {
-        durationSec = extractedSec;
-      } else if (creatorChapters.length > 0) {
-        const lastChapSec = creatorChapters[creatorChapters.length - 1].startSec;
-        durationSec = Math.max(300, lastChapSec + 120);
-      } else {
-        durationSec = 600; // 10 min baseline
-      }
-    }
-
-    // Fast probe to check if verified YouTube captions are available
+    // Fast probe to check if verified YouTube captions are available. The last
+    // caption's end offset doubles as a dependable duration fallback, since
+    // speech almost always runs to the end of the video.
     let hasCaptions = false;
+    let captionDurationSec = 0;
     try {
-      const cachedCaptions = getCached(transcriptCache, videoId);
-      if (cachedCaptions && cachedCaptions.length > 0) {
-        hasCaptions = true;
-      } else {
+      let captions = getCached(transcriptCache, videoId);
+      if (!captions || captions.length === 0) {
         const probe = await Promise.race([
           YoutubeTranscript.fetchTranscript(videoId),
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
         ]).catch(() => null);
         if (probe && Array.isArray(probe) && probe.length > 0) {
           setCached(transcriptCache, videoId, probe);
-          hasCaptions = true;
+          captions = probe;
         }
       }
+      if (captions && captions.length > 0) {
+        hasCaptions = true;
+        const last = captions[captions.length - 1];
+        const endMs = toFiniteNumber(last?.offset, 0) + toFiniteNumber(last?.duration, 0);
+        if (endMs > 0) captionDurationSec = Math.ceil(endMs / 1000);
+      }
     } catch {}
+
+    // Step 3: If duration is still unknown, fall back to increasingly rough
+    // estimates. Order matters: caption end and chapter markers are far more
+    // trustworthy than duration claims in the title/description text.
+    let durationEstimated = false;
+    if (!durationSec || durationSec <= 0) {
+      durationEstimated = true;
+      if (captionDurationSec > 0) {
+        durationSec = Math.max(60, captionDurationSec);
+      } else if (creatorChapters.length > 0) {
+        const lastChapSec = creatorChapters[creatorChapters.length - 1].startSec;
+        durationSec = Math.max(300, lastChapSec + 120);
+      } else {
+        // "The first 20 hours" is a topic, not a length. Only short, plausible
+        // text hints are trusted; anything else uses the 10-minute baseline.
+        const fullText = `${title} ${description}`;
+        const hourMatch = fullText.match(/\b(\d+)\s*(?:hours?|hrs?|h)\b/i);
+        const minMatch = fullText.match(/\b(\d+)\s*(?:minutes?|mins?|m)\b/i);
+        let extractedSec = 0;
+        if (hourMatch) extractedSec += parseInt(hourMatch[1], 10) * 3600;
+        if (minMatch) extractedSec += parseInt(minMatch[1], 10) * 60;
+        durationSec =
+          extractedSec >= 60 && extractedSec <= MAX_TITLE_DURATION_HINT_SEC ? extractedSec : 600; // 10 min baseline
+      }
+    }
 
     const info = {
       title,

@@ -339,6 +339,12 @@ export default function App() {
         }
       }
 
+      // If the user cancelled while metadata was resolving (e.g. during the
+      // oEmbed fallback, which has no request abort), stop here.
+      if (analysisSignal.aborted) {
+        throw new DOMException('Analysis cancelled', 'AbortError');
+      }
+
       if (!durationSec || durationSec <= 0) {
         addLog('Notice: Video duration probe was blocked or undetermined. Pacing with standard baseline.');
         durationSec = FALLBACK_DURATION_SEC;
@@ -636,6 +642,11 @@ export default function App() {
                   scientificEntities: [],
                 };
               } catch (clientErr: any) {
+                if (analysisSignal.aborted) {
+                  // Bail out immediately; the proxy fallback below would only
+                  // abort too, and a retry cycle would delay cancellation.
+                  throw clientErr;
+                }
                 console.warn(`Direct chunk analysis ${i} notice:`, sanitizeErrorMessage(clientErr));
               }
             }
@@ -828,12 +839,18 @@ export default function App() {
       setStatusMessage('Markdown generation complete!');
       addLog(`Markdown document created successfully (${fullReport.markdownContent.split('\n').length} lines).`);
     } catch (err: any) {
+      // A stale run (cancelled, or superseded by a newer analysis) must never
+      // clobber UI state that belongs to the current run.
+      const ownsRun = analysisRunIdRef.current === runId;
       if (analysisSignal.aborted) {
-        addLog('Analysis cancelled.');
-        setStatusMessage('');
+        if (ownsRun) {
+          addLog('Analysis cancelled.');
+          setStatusMessage('');
+        }
         return;
       }
       console.error('Analysis error:', sanitizeErrorMessage(err));
+      if (!ownsRun) return;
       const cleanMsg = sanitizeErrorMessage(err);
       setInputError(cleanMsg);
       setStatusMessage('');

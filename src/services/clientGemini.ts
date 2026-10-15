@@ -421,14 +421,62 @@ Return STRICT JSON:
       const responseText = response.text || '';
       const parsed = cleanAndParseJson<any>(responseText);
 
+      // Normalize model output exactly like the server route does, so entries
+      // always carry ids and timestamps even when the model omits fields.
+      const numOr = (value: any, fallback: number) => {
+        const num = typeof value === 'number' ? value : Number(value);
+        return Number.isFinite(num) ? num : fallback;
+      };
+
+      const transcriptList = Array.isArray(parsed.transcript) && parsed.transcript.length > 0
+        ? parsed.transcript.map((t: any, ti: number) => {
+            const entryStart = numOr(t?.startSec, nominalStartSec);
+            return {
+              id: `chunk-${chunkIndex}-t-${ti}`,
+              startSec: entryStart,
+              endSec: numOr(t?.endSec, Math.min(nominalEndSec, entryStart + 30)),
+              timestampStr: t?.timestampStr || formatTimestamp(entryStart, true),
+              speaker: t?.speaker || channelTitle || 'Speaker',
+              text: typeof t?.text === 'string' ? t.text : '',
+              chunkIndex,
+            };
+          })
+        : [
+            {
+              id: `chunk-${chunkIndex}-t-0`,
+              startSec: nominalStartSec,
+              endSec: nominalEndSec,
+              timestampStr: startFormatted,
+              speaker: channelTitle || 'Speaker',
+              text: parsed.summary || `Walkthrough and notes for [${startFormatted} - ${endFormatted}].`,
+              chunkIndex,
+            },
+          ];
+
+      const visualList = Array.isArray(parsed.visualObservations)
+        ? parsed.visualObservations.map((v: any, vi: number) => {
+            const visSec = numOr(v?.timestampSec, nominalStartSec);
+            return {
+              id: `chunk-${chunkIndex}-v-${vi}`,
+              timestampSec: visSec,
+              timestampStr: v?.timestampStr || formatTimestamp(visSec, true),
+              type: v?.type || 'demo',
+              headline: v?.headline || 'Visual Event',
+              extractedTextOrCode: v?.extractedTextOrCode || '',
+              description: v?.description || '',
+              chunkIndex,
+            };
+          })
+        : [];
+
       return {
         chunkIndex,
         nominalStartSec,
         nominalEndSec,
         summary: parsed.summary || `Segment ${chunkIndex + 1} notes.`,
         keyTakeaways: Array.isArray(parsed.keyTakeaways) ? parsed.keyTakeaways : [],
-        transcript: Array.isArray(parsed.transcript) ? parsed.transcript : [],
-        visualObservations: Array.isArray(parsed.visualObservations) ? parsed.visualObservations : [],
+        transcript: transcriptList,
+        visualObservations: visualList,
         entities: [],
         modelUsed: model,
       };
