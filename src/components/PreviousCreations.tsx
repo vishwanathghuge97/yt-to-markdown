@@ -9,7 +9,6 @@ import {
   isAuthRequiredError,
 } from '../services/googleDrive';
 import { googleSignIn, formatAuthError, auth } from '../services/firebase';
-import { DRIVE_ENABLED } from '../shared/features';
 import {
   getLocalCreations,
   deleteLocalCreation,
@@ -68,14 +67,19 @@ interface PreviousCreationsProps {
   onAuthChange: (user: User | null) => void;
   onSelectCreation: (title: string, markdownContent: string) => void;
   lastGeneratedTime?: number;
+  /** Effective Drive availability for this device (see shared/features.ts). */
+  driveEnabled: boolean;
 }
 
 /**
  * Resolves the full markdown for a history item: in-memory/localStorage copy
- * first, then IndexedDB, and finally Google Drive when only a stub exists.
- * Returns null when no source has the full content.
+ * first, then IndexedDB, and finally Google Drive when only a stub exists and
+ * the Drive feature is available. Returns null when no source has the content.
  */
-async function resolveFullContent(item: UnifiedCreation): Promise<string | null> {
+async function resolveFullContent(
+  item: UnifiedCreation,
+  driveEnabled: boolean
+): Promise<string | null> {
   if (item.markdownContent && !isStubbedContent(item.markdownContent)) {
     return item.markdownContent;
   }
@@ -87,7 +91,7 @@ async function resolveFullContent(item: UnifiedCreation): Promise<string | null>
     console.warn('Local content lookup failed:', err);
   }
 
-  if (DRIVE_ENABLED && item.driveFileId) {
+  if (driveEnabled && item.driveFileId) {
     try {
       return await fetchDriveFileContent(item.driveFileId);
     } catch (err) {
@@ -103,6 +107,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   onAuthChange,
   onSelectCreation,
   lastGeneratedTime,
+  driveEnabled,
 }) => {
   const [localCreations, setLocalCreations] = useState<CreationRecord[]>([]);
   const [driveFiles, setDriveFiles] = useState<DriveUploadResult[]>([]);
@@ -208,15 +213,19 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   );
 
   useEffect(() => {
-    // Drive feature off: nothing to sync and no auth state to reflect.
-    if (!DRIVE_ENABLED) return;
+    // Drive off: nothing to sync, no auth state to reflect.
+    if (!driveEnabled) {
+      setDriveFiles([]);
+      setNeedsReauth(false);
+      return;
+    }
     if (user) {
       loadDriveFiles(false);
     } else {
       setDriveFiles([]);
       setNeedsReauth(false);
     }
-  }, [user, loadDriveFiles]);
+  }, [user, driveEnabled, loadDriveFiles]);
 
   const handleConnectDrive = async () => {
     try {
@@ -321,7 +330,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
         setStatusNotice('Fetching from Google Drive...');
       }
 
-      const content = await resolveFullContent(item);
+      const content = await resolveFullContent(item, driveEnabled);
       if (content) {
         setStatusNotice(null);
         onSelectCreation(item.title, content);
@@ -342,7 +351,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   const handleCopy = async (item: UnifiedCreation) => {
     try {
       setActionFileId(item.id);
-      const content = await resolveFullContent(item);
+      const content = await resolveFullContent(item, driveEnabled);
       if (!content) throw new Error('No content');
 
       const copied = await copyTextToClipboard(content);
@@ -361,7 +370,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
   const handleDownload = async (item: UnifiedCreation) => {
     try {
       setActionFileId(item.id);
-      const content = await resolveFullContent(item);
+      const content = await resolveFullContent(item, driveEnabled);
       if (!content) throw new Error('No content');
 
       downloadTextFile(
@@ -382,7 +391,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       setSavingToDriveId(item.id);
       setStatusNotice('Uploading note to Google Drive...');
 
-      const contentToSave = await resolveFullContent(item);
+      const contentToSave = await resolveFullContent(item, driveEnabled);
       if (!contentToSave) {
         throw new Error('No note content found to save.');
       }
@@ -457,7 +466,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       // If it exists in Drive and Drive is connected, delete from Drive too.
       // A Drive failure is reported explicitly instead of silently claiming success.
       let driveDeleteFailed = false;
-      if (DRIVE_ENABLED && item.driveFileId && user) {
+      if (driveEnabled && item.driveFileId && user) {
         try {
           await deleteDriveFile(item.driveFileId);
           setDriveFiles((prev) => prev.filter((f) => f.id !== item.driveFileId));
@@ -526,7 +535,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
               )}
             </div>
             <p className="text-xs font-mono text-zinc-500 dark:text-zinc-400">
-              {DRIVE_ENABLED
+              {driveEnabled
                 ? 'Persistent storage in browser and synchronized with Google Drive'
                 : 'Persistent storage in your browser'}
             </p>
@@ -540,7 +549,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
             </span>
           )}
 
-          {DRIVE_ENABLED && (user ? (
+          {driveEnabled && (user ? (
             needsReauth ? (
               <button
                 type="button"
@@ -587,7 +596,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       </div>
 
       {/* Production / Vercel Domain Notice Banner if auth failed (Drive only) */}
-      {DRIVE_ENABLED && authErrorMessage && (
+      {driveEnabled && authErrorMessage && (
         <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2.5">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
           <div className="space-y-1">
@@ -603,7 +612,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
       {unifiedCreations.length > 0 && (
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
           {/* Tabs (the Drive filter exists only while the Drive feature is on) */}
-          {DRIVE_ENABLED && (
+          {driveEnabled && (
           <div className="inline-flex flex-wrap rounded-lg bg-zinc-100 dark:bg-zinc-800/80 p-1 text-xs sm:text-[13px] font-mono">
             <button
               type="button"
@@ -673,10 +682,10 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
             </h4>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed">
               When you generate notes for any YouTube video above, they will automatically be preserved
-              here{DRIVE_ENABLED ? ' and can be exported directly to your Google Drive.' : '.'}
+              here{driveEnabled ? ' and can be exported directly to your Google Drive.' : '.'}
             </p>
           </div>
-          {DRIVE_ENABLED && !user && (
+          {driveEnabled && !user && (
             <button
               type="button"
               onClick={handleConnectDrive}
@@ -802,7 +811,7 @@ export const PreviousCreations: React.FC<PreviousCreationsProps> = ({
                         </button>
 
                         {/* If note is local only, show quick Save to Drive button */}
-                        {DRIVE_ENABLED && !item.driveFileId && item.markdownContent && user && (
+                        {driveEnabled && !item.driveFileId && item.markdownContent && user && (
                           <button
                             type="button"
                             onClick={() => handleSaveToDrive(item)}

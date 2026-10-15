@@ -3,7 +3,6 @@ import { User } from 'firebase/auth';
 import { LogOut, HardDrive, Sun, Moon, Key, AlertCircle, X } from 'lucide-react';
 import { googleSignIn, logout, formatAuthError } from '../services/firebase';
 import { BrandMark } from './BrandMark';
-import { DRIVE_ENABLED } from '../shared/features';
 
 interface HeaderProps {
   user: User | null;
@@ -16,6 +15,12 @@ interface HeaderProps {
   onOpenApiKeyModal: () => void;
   /** Enables the Drive export button; false while no note is loaded. */
   hasReport?: boolean;
+  /** Effective Drive availability for this device (see shared/features.ts). */
+  driveEnabled: boolean;
+  /** True only on owner devices unlocked with ?owner=1. */
+  isOwner?: boolean;
+  /** Owner-only handler: flips Drive access for this device. */
+  onToggleDrive?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -27,6 +32,9 @@ export const Header: React.FC<HeaderProps> = ({
   apiKeyCount,
   onOpenApiKeyModal,
   hasReport = false,
+  driveEnabled,
+  isOwner = false,
+  onToggleDrive,
 }) => {
   const [isSigningIn, setIsSigningIn] = React.useState(false);
   const [authError, setAuthError] = React.useState<string | null>(null);
@@ -108,8 +116,33 @@ export const Header: React.FC<HeaderProps> = ({
             {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
+          {/* Owner-only: runtime Drive access switch (shown only on devices
+              unlocked with ?owner=1) */}
+          {isOwner && onToggleDrive && (
+            <button
+              onClick={onToggleDrive}
+              className="btn btn-ghost p-2 min-h-[40px] min-w-[40px]"
+              title={
+                driveEnabled
+                  ? 'Owner: Drive access is ON — click to turn it off'
+                  : 'Owner: Drive access is OFF — click to turn it on'
+              }
+              aria-label={driveEnabled ? 'Turn Drive access off' : 'Turn Drive access on'}
+              aria-pressed={driveEnabled}
+            >
+              <HardDrive
+                className={`w-4 h-4 ${driveEnabled ? 'text-blue-600 dark:text-blue-400' : ''}`}
+              />
+              <span
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                  driveEnabled ? 'bg-emerald-500' : 'bg-zinc-400 dark:bg-zinc-600'
+                }`}
+              />
+            </button>
+          )}
+
           {/* Google Drive Connect (hidden while the Drive feature is off) */}
-          {DRIVE_ENABLED && (user ? (
+          {driveEnabled && (user ? (
             <div className="flex items-center space-x-1 sm:space-x-1.5 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg pl-2.5 pr-1 py-1 text-xs min-h-[40px]">
               <span className="hidden min-[360px]:inline-block font-mono text-zinc-700 dark:text-zinc-300 truncate max-w-[64px] sm:max-w-[110px] text-[11px] sm:text-xs">
                 {user.email?.split('@')[0]}

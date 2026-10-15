@@ -25,7 +25,12 @@ import {
   analyzeChunkClientDirect,
 } from './services/clientGemini';
 import { sanitizeErrorMessage, isInvalidApiKeyError, isQuotaError } from './shared/gemini';
-import { DRIVE_ENABLED } from './shared/features';
+import {
+  applyOwnerDeviceParam,
+  getDriveEnabled,
+  isOwnerDevice,
+  setDriveEnabledPreference,
+} from './shared/features';
 import { extractYouTubeVideoId } from './shared/youtubeUrl';
 import { saveLocalCreation } from './services/creationStorage';
 import { initAuth } from './services/firebase';
@@ -71,6 +76,10 @@ async function apiErrorMessage(response: Response, fallback: string): Promise<st
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  // Runtime Drive switch: visitors follow the build-time default; owner
+  // devices can flip it from the header button (see shared/features.ts).
+  const [driveEnabled, setDriveEnabledState] = useState<boolean>(() => getDriveEnabled());
+  const [ownerDevice, setOwnerDeviceState] = useState<boolean>(() => isOwnerDevice());
   const [currentUrl, setCurrentUrl] = useState('');
   const [report, setReport] = useState<FullAnalysisReport | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -161,9 +170,20 @@ export default function App() {
       ?.setAttribute('content', darkMode ? '#09090b' : '#fafafa');
   }, [darkMode]);
 
+  // Owner unlock: ?owner=1 / ?owner=0 (applied once, then stripped from the URL).
+  useEffect(() => {
+    if (applyOwnerDeviceParam()) {
+      setOwnerDeviceState(isOwnerDevice());
+      setDriveEnabledState(getDriveEnabled());
+    }
+  }, []);
+
   // Auth listener (Drive feature only; skipped entirely while Drive is off)
   useEffect(() => {
-    if (!DRIVE_ENABLED) return;
+    if (!driveEnabled) {
+      setUser(null);
+      return;
+    }
     const unsubscribe = initAuth(
       (authenticatedUser) => setUser(authenticatedUser),
       () => setUser(null)
@@ -171,7 +191,14 @@ export default function App() {
     return () => {
       if (typeof unsubscribe === 'function') unsubscribe();
     };
-  }, []);
+  }, [driveEnabled]);
+
+  // Owner-only header toggle: flips Drive access for this device.
+  const handleToggleDrive = useCallback(() => {
+    const next = !driveEnabled;
+    setDriveEnabledState(next);
+    setDriveEnabledPreference(next);
+  }, [driveEnabled]);
 
   // Timer while analyzing
   useEffect(() => {
@@ -928,7 +955,10 @@ export default function App() {
       <Header
         user={user}
         onAuthChange={setUser}
-        onOpenDriveModal={DRIVE_ENABLED ? () => setIsDriveModalOpen(true) : undefined}
+        onOpenDriveModal={driveEnabled ? () => setIsDriveModalOpen(true) : undefined}
+        driveEnabled={driveEnabled}
+        isOwner={ownerDevice}
+        onToggleDrive={handleToggleDrive}
         hasReport={!!(report && report.markdownContent)}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
@@ -1207,7 +1237,7 @@ export default function App() {
           <MarkdownOutputView
             videoTitle={report.metadata.title}
             markdownContent={report.markdownContent}
-            onOpenDriveModal={DRIVE_ENABLED ? () => setIsDriveModalOpen(true) : undefined}
+            onOpenDriveModal={driveEnabled ? () => setIsDriveModalOpen(true) : undefined}
           />
         )}
 
@@ -1217,19 +1247,20 @@ export default function App() {
           onAuthChange={setUser}
           onSelectCreation={handleSelectCreation}
           lastGeneratedTime={report?.generatedAt ? new Date(report.generatedAt).getTime() : 0}
+          driveEnabled={driveEnabled}
         />
       </main>
 
       <footer className="w-full max-w-4xl sm:max-w-5xl 2xl:max-w-6xl mx-auto px-3 sm:px-6 pt-1 pb-5 sm:pb-6">
         <p className="text-center text-xs text-zinc-400 dark:text-zinc-600">
-          {DRIVE_ENABLED
+          {driveEnabled
             ? 'Notes stay in your browser or your own Google Drive.'
             : 'Notes stay in your browser.'}
         </p>
       </footer>
 
       {/* Google Drive Export Modal (hidden while the Drive feature is off) */}
-      {DRIVE_ENABLED && report && (
+      {driveEnabled && report && (
         <DriveExportModal
           isOpen={isDriveModalOpen}
           onClose={closeDriveModal}
