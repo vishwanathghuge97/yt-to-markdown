@@ -18,6 +18,11 @@ import {
   generateMarkdownReport,
   formatTimestamp,
 } from './services/pipelineEngine';
+import {
+  generateFullNotesClientDirect,
+  analyzeChunkClientDirect,
+  sanitizeErrorMessage,
+} from './services/clientGemini';
 import { initAuth } from './services/firebase';
 import {
   Play,
@@ -315,7 +320,8 @@ export default function App() {
       }
 
       if (!durationSec || durationSec <= 0) {
-        throw new Error('Could not determine this video’s duration. No Gemini analysis was started, so your API quota was not used. Please retry.');
+        addLog('Notice: Video duration probe was blocked or undetermined. Pacing with standard baseline.');
+        durationSec = 600;
       }
 
       addLog(`Video: "${videoTitle}" by ${authorName}`);
@@ -346,123 +352,167 @@ export default function App() {
         setStatusMessage(`Generating structured notes & Markdown for "${videoTitle}"...`);
         addLog(`Analyzing video stream with Gemini AI (Fast Single-Pass Pipeline)...`);
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 55000);
+        const activeKey = customApiKeys[activeApiKeyIndexRef.current] || customApiKey || '';
 
-        let fastRes: Response | null = null;
-        try {
-          fastRes = await requestWithKeyRotation('/api/gemini/generate-full-notes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            signal: controller.signal,
-            body: JSON.stringify({
+        // Priority 1: Direct Client-Side Gemini Execution (Zero Vercel Serverless Timeout!)
+        if (activeKey) {
+          try {
+            addLog('Executing direct client-side Gemini generation (unlimited by Vercel function timeout)...');
+            const directRes = await generateFullNotesClientDirect({
+              apiKey: activeKey,
               videoUrl: url,
               videoTitle,
               channelTitle: authorName,
               durationSec,
               creatorChapters,
               videoDescription: description,
-            }),
-          });
-        } finally {
-          clearTimeout(timeoutId);
+              onProgress: (msg) => {
+                setStatusMessage(msg);
+                addLog(msg);
+              },
+            });
+
+            if (directRes && directRes.report) {
+              setAnalysisPhase('preparing');
+              setProgressPercent(90);
+              setStatusMessage('Compiling final Markdown document...');
+              generatedReport = directRes.report;
+              generatedReport.markdownContent = generateMarkdownReport(generatedReport);
+              addLog(`✓ Direct Gemini analysis completed successfully (${directRes.modelUsed})!`);
+            }
+          } catch (directErr: any) {
+            console.warn('Direct client generation notice:', sanitizeErrorMessage(directErr));
+            addLog(`Direct note generation noticed: ${sanitizeErrorMessage(directErr)}`);
+            // Check if key rotation is needed
+            if (/API_KEY_INVALID|invalid.*api.*key|quota|rate limit/i.test(directErr?.message || '') && customApiKeys.length > 1) {
+              const nextIndex = (activeApiKeyIndexRef.current + 1) % customApiKeys.length;
+              activeApiKeyIndexRef.current = nextIndex;
+              setActiveApiKeyIndex(nextIndex);
+              addLog(`Rotating to backup API key ${nextIndex + 1}...`);
+            }
+          }
         }
 
-        if (fastRes && !fastRes.ok) {
-          const message = await apiErrorMessage(fastRes, 'Fast note generation failed');
-          const apiError = new Error(message) as Error & { stopFallback?: boolean };
-          apiError.stopFallback = [400, 401, 403, 429].includes(fastRes.status);
-          throw apiError;
-        }
+        // Priority 2: Fallback to proxy route if direct client generation did not produce a report
+        if (!generatedReport) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 14000);
 
-        if (fastRes && fastRes.ok) {
-          const fastData = await fastRes.json();
-          const r = fastData.result || {};
+          let fastRes: Response | null = null;
+          try {
+            fastRes = await requestWithKeyRotation('/api/gemini/generate-full-notes', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              signal: controller.signal,
+              body: JSON.stringify({
+                videoUrl: url,
+                videoTitle,
+                channelTitle: authorName,
+                durationSec,
+                creatorChapters,
+                videoDescription: description,
+              }),
+            });
+          } finally {
+            clearTimeout(timeoutId);
+          }
 
-          if (r.executiveSummary || (Array.isArray(r.chapters) && r.chapters.length > 0)) {
-            setAnalysisPhase('preparing');
-            setProgressPercent(85);
-            setStatusMessage('Compiling final Markdown document...');
+          if (fastRes && !fastRes.ok) {
+            const message = await apiErrorMessage(fastRes, 'Fast note generation failed');
+            const apiError = new Error(message) as Error & { stopFallback?: boolean };
+            apiError.stopFallback = [400, 401, 403, 429].includes(fastRes.status);
+            throw apiError;
+          }
 
-            const rawChapters: any[] = Array.isArray(r.chapters) && r.chapters.length > 0 ? r.chapters : [
-              {
-                chapterIndex: 1,
-                title: videoTitle,
-                startSec: 0,
-                endSec: durationSec,
-                timeRangeStr: `00:00 - ${formatTimestamp(durationSec)}`,
-                coveredChunks: [0],
-                overview: r.executiveSummary || 'Video walkthrough and summary notes.',
-                keyConcepts: r.keyTakeaways || [],
+          if (fastRes && fastRes.ok) {
+            const fastData = await fastRes.json();
+            const r = fastData.result || {};
+
+            if (r.executiveSummary || (Array.isArray(r.chapters) && r.chapters.length > 0)) {
+              setAnalysisPhase('preparing');
+              setProgressPercent(85);
+              setStatusMessage('Compiling final Markdown document...');
+
+              const rawChapters: any[] = Array.isArray(r.chapters) && r.chapters.length > 0 ? r.chapters : [
+                {
+                  chapterIndex: 1,
+                  title: videoTitle,
+                  startSec: 0,
+                  endSec: durationSec,
+                  timeRangeStr: `00:00 - ${formatTimestamp(durationSec)}`,
+                  coveredChunks: [0],
+                  overview: r.executiveSummary || 'Video walkthrough and summary notes.',
+                  keyConcepts: r.keyTakeaways || [],
+                  scientificHighlights: [],
+                },
+              ];
+
+              const formattedChapters: ChapterCluster[] = rawChapters.map((c: any, idx: number) => ({
+                chapterIndex: c.chapterIndex ?? idx + 1,
+                title: c.title || `Chapter ${idx + 1}`,
+                startSec: c.startSec ?? 0,
+                endSec: c.endSec ?? durationSec,
+                timeRangeStr: c.timeRangeStr || `${formatTimestamp(c.startSec || 0)} - ${formatTimestamp(c.endSec || durationSec)}`,
+                coveredChunks: [idx],
+                overview: c.overview || '',
+                keyConcepts: Array.isArray(c.keyConcepts) ? c.keyConcepts : [],
                 scientificHighlights: [],
-              },
-            ];
+              }));
 
-            const formattedChapters: ChapterCluster[] = rawChapters.map((c: any, idx: number) => ({
-              chapterIndex: c.chapterIndex ?? idx + 1,
-              title: c.title || `Chapter ${idx + 1}`,
-              startSec: c.startSec ?? 0,
-              endSec: c.endSec ?? durationSec,
-              timeRangeStr: c.timeRangeStr || `${formatTimestamp(c.startSec || 0)} - ${formatTimestamp(c.endSec || durationSec)}`,
-              coveredChunks: [idx],
-              overview: c.overview || '',
-              keyConcepts: Array.isArray(c.keyConcepts) ? c.keyConcepts : [],
-              scientificHighlights: [],
-            }));
+              const formattedTranscript = Array.isArray(r.transcript) ? r.transcript.map((t: any, idx: number) => ({
+                id: `fast-t-${idx}`,
+                startSec: t.startSec ?? 0,
+                endSec: t.endSec ?? 30,
+                timestampStr: t.timestampStr || formatTimestamp(t.startSec || 0),
+                speaker: t.speaker || authorName || 'Speaker',
+                text: t.text || '',
+                chunkIndex: 0,
+              })) : [];
 
-            const formattedTranscript = Array.isArray(r.transcript) ? r.transcript.map((t: any, idx: number) => ({
-              id: `fast-t-${idx}`,
-              startSec: t.startSec ?? 0,
-              endSec: t.endSec ?? 30,
-              timestampStr: t.timestampStr || formatTimestamp(t.startSec || 0),
-              speaker: t.speaker || authorName || 'Speaker',
-              text: t.text || '',
-              chunkIndex: 0,
-            })) : [];
+              const formattedVisuals = Array.isArray(r.visualObservations) ? r.visualObservations.map((v: any, idx: number) => ({
+                id: `fast-v-${idx}`,
+                timestampSec: v.timestampSec ?? 0,
+                timestampStr: v.timestampStr || formatTimestamp(v.timestampSec || 0),
+                type: v.type || 'demo',
+                headline: v.headline || 'Visual Note',
+                extractedTextOrCode: v.extractedTextOrCode || '',
+                description: v.description || '',
+                chunkIndex: 0,
+              })) : [];
 
-            const formattedVisuals = Array.isArray(r.visualObservations) ? r.visualObservations.map((v: any, idx: number) => ({
-              id: `fast-v-${idx}`,
-              timestampSec: v.timestampSec ?? 0,
-              timestampStr: v.timestampStr || formatTimestamp(v.timestampSec || 0),
-              type: v.type || 'demo',
-              headline: v.headline || 'Visual Note',
-              extractedTextOrCode: v.extractedTextOrCode || '',
-              description: v.description || '',
-              chunkIndex: 0,
-            })) : [];
+              generatedReport = {
+                metadata: currentMetadata,
+                config: {
+                  chunkDurationSec: 2400,
+                  overlapSec: 20,
+                  mediaResolution: 'high',
+                  totalChunks: planned.length,
+                  totalTokens: 300000,
+                  directYouTubeMode: true,
+                },
+                executiveSummary: r.executiveSummary || 'Executive summary compiled from video.',
+                keyTakeaways: Array.isArray(r.keyTakeaways) && r.keyTakeaways.length > 0 ? r.keyTakeaways : ['Key takeaways extracted.'],
+                chapters: formattedChapters,
+                transcript: formattedTranscript,
+                visualObservations: formattedVisuals,
+                scientificEntities: [],
+                literatureMatches: [],
+                markdownContent: '',
+                generatedAt: new Date().toISOString(),
+              };
 
-            generatedReport = {
-              metadata: currentMetadata,
-              config: {
-                chunkDurationSec: 2400,
-                overlapSec: 20,
-                mediaResolution: 'high',
-                totalChunks: planned.length,
-                totalTokens: 300000,
-                directYouTubeMode: true,
-              },
-              executiveSummary: r.executiveSummary || 'Executive summary compiled from video.',
-              keyTakeaways: Array.isArray(r.keyTakeaways) && r.keyTakeaways.length > 0 ? r.keyTakeaways : ['Key takeaways extracted.'],
-              chapters: formattedChapters,
-              transcript: formattedTranscript,
-              visualObservations: formattedVisuals,
-              scientificEntities: [],
-              literatureMatches: [],
-              markdownContent: '',
-              generatedAt: new Date().toISOString(),
-            };
-
-            generatedReport.markdownContent = generateMarkdownReport(generatedReport);
-            addLog(
-              fastData.hasOfficialTranscript
-                ? `✓ Extracted verified official YouTube transcript (${formattedTranscript.length} dialogue entries) with ${formattedChapters.length} chapters!`
-                : `✓ Complete analysis finished with ${formattedTranscript.length} timestamped transcript entries and ${formattedChapters.length} chapters.`
-            );
+              generatedReport.markdownContent = generateMarkdownReport(generatedReport);
+              addLog(
+                fastData.hasOfficialTranscript
+                  ? `✓ Extracted verified official YouTube transcript (${formattedTranscript.length} dialogue entries) with ${formattedChapters.length} chapters!`
+                  : `✓ Complete analysis finished with ${formattedTranscript.length} timestamped transcript entries and ${formattedChapters.length} chapters.`
+              );
+            }
           }
         }
       } catch (fastErr: any) {
         if (fastErr?.stopFallback) throw fastErr;
-        addLog(`Single-pass notice: ${fastErr.message}. Automatically proceeding with multi-segment window analysis...`);
+        addLog(`Single-pass notice: ${sanitizeErrorMessage(fastErr)}. Automatically proceeding with multi-segment window analysis...`);
       }
 
       // If fast pass succeeded, set report immediately!
@@ -505,20 +555,18 @@ export default function App() {
 
         let chunkSuccess = false;
         let lastChunkErr: any = null;
+        const activeKey = customApiKeys[activeApiKeyIndexRef.current] || customApiKey || '';
 
         // Try chunk analysis up to 3 times with timeout and key rotation
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
-            const chunkController = new AbortController();
-            const chunkTimeout = setTimeout(() => chunkController.abort(), 42000);
+            let analysisResult: ChunkAnalysisResult | null = null;
 
-            let res: Response;
-            try {
-              res = await requestWithKeyRotation('/api/gemini/analyze-chunk', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                signal: chunkController.signal,
-                body: JSON.stringify({
+            // Direct client execution (no Vercel serverless timeouts)
+            if (activeKey) {
+              try {
+                const clientChunk = await analyzeChunkClientDirect({
+                  apiKey: activeKey,
                   videoUrl: url,
                   videoTitle,
                   channelTitle: authorName,
@@ -528,40 +576,77 @@ export default function App() {
                   topicContextHint: segTitle,
                   videoDescription: description,
                   totalDurationSec: durationSec,
-                }),
-              });
-            } finally {
-              clearTimeout(chunkTimeout);
+                });
+                analysisResult = {
+                  chunkIndex: i,
+                  startSec: chunk.nominalStartSec,
+                  endSec: chunk.nominalEndSec,
+                  summary: clientChunk.summary || `Summary for ${timeSpan}`,
+                  keyTakeaways: clientChunk.keyTakeaways || [],
+                  transcript: clientChunk.transcript || [],
+                  visualObservations: clientChunk.visualObservations || [],
+                  scientificEntities: [],
+                };
+              } catch (clientErr: any) {
+                console.warn(`Direct chunk analysis ${i} notice:`, sanitizeErrorMessage(clientErr));
+              }
             }
 
-            if (!res.ok) {
-              throw new Error(await apiErrorMessage(res, `Segment ${i + 1} request failed`));
-            }
+            if (!analysisResult) {
+              const chunkController = new AbortController();
+              const chunkTimeout = setTimeout(() => chunkController.abort(), 14000);
 
-            const data = await res.json();
-            const rawResult = data.result || {};
-            const analysisResult: ChunkAnalysisResult = {
-              chunkIndex: rawResult.chunkIndex ?? i,
-              startSec: rawResult.startSec ?? chunk.nominalStartSec,
-              endSec: rawResult.endSec ?? chunk.nominalEndSec,
-              summary: rawResult.summary || data.markdown || `Summary for ${timeSpan}`,
-              keyTakeaways: Array.isArray(rawResult.keyTakeaways) ? rawResult.keyTakeaways : [],
-              transcript: Array.isArray(rawResult.transcript) && rawResult.transcript.length > 0
-                ? rawResult.transcript
-                : [
-                    {
-                      id: `chunk-${i}-t-0`,
-                      startSec: chunk.nominalStartSec,
-                      endSec: chunk.nominalEndSec,
-                      timestampStr: formatTimestamp(chunk.nominalStartSec),
-                      speaker: authorName || 'Speaker',
-                      text: rawResult.summary || data.markdown || segTitle,
-                      chunkIndex: i,
-                    },
-                  ],
-              visualObservations: Array.isArray(rawResult.visualObservations) ? rawResult.visualObservations : [],
-              scientificEntities: [],
-            };
+              let res: Response;
+              try {
+                res = await requestWithKeyRotation('/api/gemini/analyze-chunk', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  signal: chunkController.signal,
+                  body: JSON.stringify({
+                    videoUrl: url,
+                    videoTitle,
+                    channelTitle: authorName,
+                    chunkIndex: i,
+                    nominalStartSec: chunk.nominalStartSec,
+                    nominalEndSec: chunk.nominalEndSec,
+                    topicContextHint: segTitle,
+                    videoDescription: description,
+                    totalDurationSec: durationSec,
+                  }),
+                });
+              } finally {
+                clearTimeout(chunkTimeout);
+              }
+
+              if (!res.ok) {
+                throw new Error(await apiErrorMessage(res, `Segment ${i + 1} request failed`));
+              }
+
+              const data = await res.json();
+              const rawResult = data.result || {};
+              analysisResult = {
+                chunkIndex: rawResult.chunkIndex ?? i,
+                startSec: rawResult.startSec ?? chunk.nominalStartSec,
+                endSec: rawResult.endSec ?? chunk.nominalEndSec,
+                summary: rawResult.summary || data.markdown || `Summary for ${timeSpan}`,
+                keyTakeaways: Array.isArray(rawResult.keyTakeaways) ? rawResult.keyTakeaways : [],
+                transcript: Array.isArray(rawResult.transcript) && rawResult.transcript.length > 0
+                  ? rawResult.transcript
+                  : [
+                      {
+                        id: `chunk-${i}-t-0`,
+                        startSec: chunk.nominalStartSec,
+                        endSec: chunk.nominalEndSec,
+                        timestampStr: formatTimestamp(chunk.nominalStartSec),
+                        speaker: authorName || 'Speaker',
+                        text: rawResult.summary || data.markdown || segTitle,
+                        chunkIndex: i,
+                      },
+                    ],
+                visualObservations: Array.isArray(rawResult.visualObservations) ? rawResult.visualObservations : [],
+                scientificEntities: [],
+              };
+            }
             chunkResults.push(analysisResult);
 
             // Deduplicate overlap with previous chunk
@@ -670,10 +755,11 @@ export default function App() {
         setStatusMessage('');
         return;
       }
-      console.error('Analysis error:', err);
-      setInputError(err.message || 'Generation failed. Please verify the YouTube URL.');
+      console.error('Analysis error:', sanitizeErrorMessage(err));
+      const cleanMsg = sanitizeErrorMessage(err);
+      setInputError(cleanMsg);
       setStatusMessage('');
-      addLog(`Error: ${err.message || 'Generation failed'}`);
+      addLog(`Error: ${cleanMsg}`);
     } finally {
       setIsAnalyzing(false);
       setActiveChunkIndex(-1);

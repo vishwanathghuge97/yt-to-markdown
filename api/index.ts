@@ -72,7 +72,7 @@ const infoCache = new Map<string, { expiresAt: number; value: unknown }>();
 const transcriptCache = new Map<string, { expiresAt: number; value: any[] }>();
 const inFlightTranscripts = new Map<string, Promise<any[]>>();
 
-async function fetchWithTimeout(input: string, init: RequestInit = {}, timeoutMs = 10000): Promise<Response> {
+async function fetchWithTimeout(input: string, init: RequestInit = {}, timeoutMs = 3500): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -137,7 +137,7 @@ function getAiClient(userApiKey?: string): GoogleGenAI {
   return new GoogleGenAI({
     apiKey: key,
     httpOptions: {
-      timeout: 35000,
+      timeout: 55000,
       headers: {
         'User-Agent': 'aistudio-build',
       },
@@ -308,7 +308,7 @@ async function generateWithCascade(
   userApiKey?: string,
   onTextChunk?: (text: string) => void,
   videoWindow?: { startSec: number; endSec: number },
-  callTimeoutMs = 24000
+  callTimeoutMs = 52000
 ): Promise<{ text: string; modelUsed: string }> {
   const aiClient = getAiClient(userApiKey);
   const models = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
@@ -467,7 +467,7 @@ router.get('/youtube/info', async (req, res) => {
     }
 
     const videoId = extractYouTubeVideoId(url);
-    if (!videoId) {
+    if (!videoId || !/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
       return res.status(400).json({
         error: 'Not a valid YouTube link. Please enter a valid YouTube URL (e.g. https://www.youtube.com/watch?v=... or https://youtu.be/...).',
       });
@@ -629,7 +629,10 @@ router.get('/youtube/info', async (req, res) => {
       if (cachedCaptions && cachedCaptions.length > 0) {
         hasCaptions = true;
       } else {
-        const probe = await YoutubeTranscript.fetchTranscript(videoId).catch(() => null);
+        const probe = await Promise.race([
+          YoutubeTranscript.fetchTranscript(videoId),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+        ]).catch(() => null);
         if (probe && Array.isArray(probe) && probe.length > 0) {
           setCached(transcriptCache, videoId, probe);
           hasCaptions = true;
