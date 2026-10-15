@@ -160,7 +160,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setKeyValues((current) => current.length > 1 ? current.filter((_, i) => i !== index) : [''])}
-                    className="p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition"
+                    className="p-2.5 min-h-[40px] min-w-[40px] rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition"
                     aria-label={`Remove API key ${index + 1}`}
                     title="Remove key"
                   >
@@ -171,7 +171,7 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
               <button
                 type="button"
                 onClick={() => setKeyValues((current) => [...current, ''])}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-dashed border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-mono transition"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 min-h-[40px] sm:min-h-[32px] rounded-md border border-dashed border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-mono transition"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Add another key
@@ -250,13 +250,13 @@ export const ApiKeyModal: React.FC<ApiKeyModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="btn btn-secondary px-3.5 py-2 text-xs"
+              className="btn btn-secondary px-3.5 py-2 min-h-[44px] sm:min-h-[40px] text-xs"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="btn btn-primary px-4 py-2 text-xs"
+              className="btn btn-primary px-4 py-2 min-h-[44px] sm:min-h-[40px] text-xs"
             >
               Save Key
             </button>

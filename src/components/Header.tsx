@@ -119,7 +119,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   onClick={onOpenDriveModal}
                   disabled={!hasReport}
-                  className="btn btn-ghost px-2 py-1 text-[11px]"
+                  className="btn btn-ghost px-2 py-1 min-h-[32px] text-[11px]"
                   title={
                     hasReport
                       ? 'Google Drive export destination'
@@ -134,7 +134,7 @@ export const Header: React.FC<HeaderProps> = ({
 
               <button
                 onClick={handleSignOut}
-                className="btn btn-ghost p-1.5"
+                className="btn btn-ghost p-1.5 min-h-[32px] min-w-[32px]"
                 title="Disconnect"
                 aria-label="Disconnect Google account"
               >

@@ -964,7 +964,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsApiKeyModalOpen(true)}
-                  className="btn btn-primary px-3 py-1.5 min-h-[36px] sm:min-h-0 text-xs shrink-0 self-start sm:self-auto"
+                  className="btn btn-primary px-3 py-1.5 min-h-[40px] sm:min-h-[32px] text-xs shrink-0 self-start sm:self-auto"
                 >
                   Enter Free Key
                 </button>
@@ -981,7 +981,7 @@ export default function App() {
                   <button
                     type="submit"
                     onClick={() => setInputError('')}
-                    className="btn shrink-0 px-2.5 py-1.5 rounded-md border border-rose-300 dark:border-rose-800 bg-white/70 dark:bg-rose-950/50 hover:bg-white dark:hover:bg-rose-900 text-rose-800 dark:text-rose-200 text-[11px] font-semibold"
+                    className="btn shrink-0 px-2.5 py-1.5 min-h-[40px] sm:min-h-[32px] rounded-md border border-rose-300 dark:border-rose-800 bg-white/70 dark:bg-rose-950/50 hover:bg-white dark:hover:bg-rose-900 text-rose-800 dark:text-rose-200 text-[11px] font-semibold"
                   >
                     Retry
                   </button>

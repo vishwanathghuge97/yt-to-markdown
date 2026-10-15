@@ -183,7 +183,7 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
                   href={exportResult.webViewLink}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition touch-manipulation"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[40px] sm:min-h-[32px] bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition touch-manipulation"
                 >
                   <span>Open in Google Drive</span>
                   <ExternalLink className="w-3.5 h-3.5" />
@@ -230,7 +230,7 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
         <div className="px-4 sm:px-6 py-3 sm:py-4 bg-zinc-50 dark:bg-zinc-800/60 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-end gap-2.5">
           <button
             onClick={onClose}
-            className="btn btn-secondary px-3.5 py-2 min-h-[44px] text-xs"
+            className="btn btn-secondary px-3.5 py-2 min-h-[44px] sm:min-h-[40px] text-xs"
           >
             Cancel
           </button>
@@ -238,7 +238,7 @@ export const DriveExportModal: React.FC<DriveExportModalProps> = ({
           <button
             onClick={handleConfirmExport}
             disabled={isExporting}
-            className="btn btn-primary px-4 py-2 min-h-[44px] text-xs font-semibold"
+            className="btn btn-primary px-4 py-2 min-h-[44px] sm:min-h-[40px] text-xs font-semibold"
           >
             {isExporting ? (
               <>

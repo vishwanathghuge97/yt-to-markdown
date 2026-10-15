@@ -68,7 +68,7 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
           <div className="flex rounded-lg bg-zinc-100 dark:bg-zinc-800/80 p-1 text-xs">
             <button
               onClick={() => setViewMode('preview')}
-              className={`px-2.5 py-1 min-h-[36px] sm:min-h-0 rounded-md font-mono text-[11px] transition ${
+              className={`px-2.5 py-1 min-h-[40px] sm:min-h-[32px] rounded-md font-mono text-[11px] transition ${
                 viewMode === 'preview'
                   ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-xs font-semibold'
                   : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'
@@ -78,7 +78,7 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
             </button>
             <button
               onClick={() => setViewMode('raw')}
-              className={`px-2.5 py-1 min-h-[36px] sm:min-h-0 rounded-md font-mono text-[11px] transition ${
+              className={`px-2.5 py-1 min-h-[40px] sm:min-h-[32px] rounded-md font-mono text-[11px] transition ${
                 viewMode === 'raw'
                   ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-xs font-semibold'
                   : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'
@@ -92,7 +92,7 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
             {/* Copy */}
             <button
               onClick={handleCopy}
-              className="btn btn-secondary px-2.5 py-1.5 min-h-[38px] sm:min-h-0 text-[11px] font-mono"
+              className="btn btn-secondary px-2.5 py-1.5 min-h-[40px] sm:min-h-[32px] text-[11px] font-mono"
               aria-label="Copy markdown"
             >
               {copied ? (
@@ -111,7 +111,7 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
             {/* Download */}
             <button
               onClick={handleDownload}
-              className="btn btn-primary px-2.5 py-1.5 min-h-[38px] sm:min-h-0 text-[11px] font-mono"
+              className="btn btn-primary px-2.5 py-1.5 min-h-[40px] sm:min-h-[32px] text-[11px] font-mono"
               aria-label="Download markdown file"
             >
               <Download className="w-3.5 h-3.5" />
@@ -121,7 +121,7 @@ export const MarkdownOutputView: React.FC<MarkdownOutputViewProps> = ({
             {/* Save to Drive */}
             <button
               onClick={onOpenDriveModal}
-              className="btn btn-secondary px-2.5 py-1.5 min-h-[38px] sm:min-h-0 text-[11px] font-mono"
+              className="btn btn-secondary px-2.5 py-1.5 min-h-[40px] sm:min-h-[32px] text-[11px] font-mono"
               title="Save copy to Google Drive"
               aria-label="Save to Google Drive"
             >
