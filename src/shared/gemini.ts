@@ -47,3 +47,22 @@ export function sanitizeErrorMessage(err: unknown): string {
   }
   return msg;
 }
+
+/**
+ * One short, plain-language phrase describing why an analysis attempt failed.
+ * The user-facing activity log uses this instead of raw error text: model
+ * names, network layers, JSON internals, and infrastructure details stay on
+ * the developer console only.
+ */
+export function describeAnalysisError(input: unknown): string {
+  if (!input) return 'an unexpected issue occurred';
+  const message = typeof input === 'string' ? input : String((input as any)?.message || '');
+  if (isInvalidApiKeyError(message)) return 'your API key was rejected';
+  if (isQuotaError(message)) return 'the rate limit was reached';
+  if (/aborted|timed out|timeout|timeouterror/i.test(message)) return 'it took too long';
+  if (/empty response|could not parse|invalid json|no text/i.test(message)) return 'the response format was unusable';
+  if (/failed to fetch|failed to parse url|networkerror|network error|load failed|connection|internet/i.test(message)) return 'the network dropped';
+  if (/not found|unsupported|404|model .* unavailable/i.test(message)) return 'the model was unavailable';
+  if (/media|fileData|file uri|youtube/i.test(message)) return 'the video could not be opened';
+  return 'an unexpected issue occurred';
+}

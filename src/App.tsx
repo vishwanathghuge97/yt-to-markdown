@@ -24,7 +24,7 @@ import {
   generateFullNotesClientDirect,
   analyzeChunkClientDirect,
 } from './services/clientGemini';
-import { sanitizeErrorMessage, isInvalidApiKeyError, isQuotaError } from './shared/gemini';
+import { sanitizeErrorMessage, isInvalidApiKeyError, isQuotaError, describeAnalysisError } from './shared/gemini';
 import {
   applyOwnerDeviceParam,
   getDriveEnabled,
@@ -299,6 +299,7 @@ export default function App() {
     setInputError('');
     setIsAnalyzing(true);
     const runId = ++analysisRunIdRef.current;
+    const runStartedAt = Date.now();
     const analysisController = new AbortController();
     abortControllerRef.current = analysisController;
     const analysisSignal = analysisController.signal;
@@ -310,7 +311,7 @@ export default function App() {
     setActiveChunkIndex(-1);
     setReport(null);
     setStatusMessage('Connecting to YouTube and reading video information...');
-    addLog(`Target URL: ${url} (ID: ${videoId})`);
+    addLog(`Analyzing: ${url}`);
 
     try {
       // 1. Fetch real video metadata and duration
@@ -340,7 +341,7 @@ export default function App() {
           if (info.description) description = info.description;
           if (Array.isArray(info.creatorChapters)) creatorChapters = info.creatorChapters;
           if (info.durationEstimated) {
-            addLog('Notice: YouTube did not report the video length; using an estimated duration.');
+            addLog('YouTube did not report the video length; using an estimate for pacing.');
           }
         } else {
           throw new Error(await apiErrorMessage(infoRes, 'Could not inspect the YouTube video'));
@@ -348,7 +349,7 @@ export default function App() {
       } catch (backendErr) {
         // A user cancellation must not fall through to the oEmbed fallback path.
         if (analysisSignal.aborted) throw backendErr;
-        addLog('Server inspection notice: Trying direct YouTube oEmbed fallback...');
+        addLog('Reading the video info directly from YouTube…');
         // Resilient fallback: Query YouTube official oEmbed directly from browser
         try {
           const oembedRes = await fetch(
@@ -374,7 +375,7 @@ export default function App() {
       }
 
       if (!durationSec || durationSec <= 0) {
-        addLog('Notice: Video duration probe was blocked or undetermined. Pacing with standard baseline.');
+        addLog('Could not read the exact video length; assuming 10 minutes for pacing.');
         durationSec = FALLBACK_DURATION_SEC;
       }
 
@@ -404,14 +405,15 @@ export default function App() {
         setAnalysisPhase('analyzing');
         setProgressPercent(25);
         setStatusMessage(`Generating structured notes & Markdown for "${videoTitle}"...`);
-        addLog(`Analyzing video stream with Gemini AI (Fast Single-Pass Pipeline)...`);
+        addLog('Analyzing the full video in one pass…');
 
         const activeKey = customApiKeys[activeApiKeyIndexRef.current] || customApiKey || '';
 
         // Priority 1: Direct Client-Side Gemini Execution (Zero Vercel Serverless Timeout!)
         if (activeKey) {
           try {
-            addLog('Executing direct client-side Gemini generation (unlimited by Vercel function timeout)...');
+            addLog('Asking Gemini to analyze the video…');
+            const directStartedAt = Date.now();
             const directRes = await generateFullNotesClientDirect({
               apiKey: activeKey,
               videoUrl: url,
@@ -443,14 +445,14 @@ export default function App() {
               } catch (saveErr) {
                 console.warn('Could not save note locally:', saveErr);
               }
-              addLog(`✓ Direct Gemini analysis completed successfully (${directRes.modelUsed})!`);
+              addLog(`✓ Gemini analysis finished in ${Math.round((Date.now() - directStartedAt) / 1000)}s.`);
             }
           } catch (directErr: any) {
             if (analysisSignal.aborted) {
               throw directErr;
             }
+            addLog(`⚠️ Direct analysis failed (${describeAnalysisError(directErr)}) — trying the app server route…`);
             console.warn('Direct client generation notice:', sanitizeErrorMessage(directErr));
-            addLog(`Direct note generation noticed: ${sanitizeErrorMessage(directErr)}`);
             // Rotate to a backup key when the active key is invalid or exhausted.
             if ((isInvalidApiKeyError(directErr) || isQuotaError(directErr)) && customApiKeys.length > 1) {
               const nextIndex = (activeApiKeyIndexRef.current + 1) % customApiKeys.length;
@@ -593,7 +595,7 @@ export default function App() {
         // A user cancellation (or a hard 4xx: missing/short body, bad key) must
         // stop the pipeline; a timeout/network error falls through to windows.
         if (fastErr?.stopFallback || analysisSignal.aborted) throw fastErr;
-        addLog(`Single-pass notice: ${sanitizeErrorMessage(fastErr)}. Automatically proceeding with multi-segment window analysis...`);
+        addLog(`⚠️ Single-pass analysis didn't finish (${describeAnalysisError(fastErr)}) — switching to shorter section windows…`);
       }
 
       // If fast pass succeeded, set report immediately (unless cancelled meanwhile).
@@ -601,11 +603,11 @@ export default function App() {
         setReport(generatedReport);
         setProgressPercent(100);
         setStatusMessage('Markdown generation complete!');
-        addLog(`Markdown document created successfully (${generatedReport.markdownContent.split('\n').length} lines).`);
+        addLog(`Markdown document created successfully (${generatedReport.markdownContent.split('\n').length} lines) in ${Math.round((Date.now() - runStartedAt) / 1000)}s.`);
         return;
       }
 
-      addLog(`Planned ${planned.length} Gemini video windows (proportional to ${formatTimestamp(durationSec)}).`);
+      addLog(`Video split into ${planned.length} short analysis windows…`);
       setAnalysisPhase('analyzing');
       setProgressPercent(15);
       setStatusMessage(`Preparing ${planned.length} video windows for analysis...`);
@@ -614,29 +616,20 @@ export default function App() {
       let cumulativeTranscript: any[] = [];
       let cumulativeVisuals: any[] = [];
 
-      // 4. Process each segment sequentially with real-time feedback
-      for (let i = 0; i < planned.length; i++) {
-        if (analysisSignal.aborted) {
-          throw new DOMException('Analysis cancelled', 'AbortError');
-        }
+      /**
+       * Analyzes one video window with up to 3 attempts (direct Gemini call first,
+       * then the server route with key rotation). Returns null when every attempt
+       * failed; the batch loop inserts a brief fallback note so the final
+       * transcript stays continuous.
+       */
+      const analyzeWindow = async (i: number): Promise<{ result: ChunkAnalysisResult | null; elapsedSec: number; failure: unknown }> => {
         const chunk = planned[i];
-        setActiveChunkIndex(i);
-
-        // Update chunk status
-        setPlannedChunks((prev) =>
-          prev.map((c, idx) => (idx === i ? { ...c, status: 'processing' } : c))
-        );
-
         const timeSpan = `${formatTimestamp(chunk.nominalStartSec)} - ${formatTimestamp(chunk.nominalEndSec)}`;
         const segTitle = `Part ${i + 1}`;
-
-        const pct = Math.round(20 + ((i) / planned.length) * 65);
-        setProgressPercent(pct);
-        setStatusMessage(`Processing segment ${i + 1}/${planned.length} [${timeSpan}]: ${segTitle}`);
-        addLog(`[Segment ${i + 1}/${planned.length}] Analyzing ${timeSpan} — ${segTitle}`);
-
-        let chunkSuccess = false;
+        const windowStartedAt = Date.now();
         let lastChunkErr: any = null;
+
+        addLog(`[Segment ${i + 1}/${planned.length}] Analyzing ${timeSpan} — ${segTitle}`);
 
         // Try chunk analysis up to 3 times with timeout and key rotation.
         for (let attempt = 0; attempt < 3; attempt++) {
@@ -735,30 +728,11 @@ export default function App() {
                 scientificEntities: [],
               };
             }
-            chunkResults.push(analysisResult);
-
-            // Deduplicate overlap with previous chunk
-            if (i > 0) {
-              const dedupe = deduplicateOverlapEntries(
-                cumulativeTranscript,
-                analysisResult.transcript,
-                chunk.nominalStartSec,
-                CHUNK_OVERLAP_SEC
-              );
-              cumulativeTranscript = dedupe.merged;
-            } else {
-              cumulativeTranscript = [...analysisResult.transcript];
-            }
-
-            cumulativeVisuals.push(...analysisResult.visualObservations);
-            addLog(`✓ Segment ${i + 1} completed (${analysisResult.transcript.length} dialogue entries, ${analysisResult.visualObservations.length} visual notes).`);
-
-            // Mark chunk as completed
-            setPlannedChunks((prev) =>
-              prev.map((c, idx) => (idx === i ? { ...c, status: 'completed' } : c))
-            );
-            chunkSuccess = true;
-            break;
+            return {
+              result: analysisResult,
+              elapsedSec: Math.round((Date.now() - windowStartedAt) / 1000),
+              failure: null,
+            };
           } catch (err: any) {
             // Stop immediately on user cancellation instead of retrying.
             if (analysisSignal.aborted) {
@@ -766,50 +740,106 @@ export default function App() {
             }
             lastChunkErr = err;
             if (attempt < 2) {
-              addLog(`Segment ${i + 1} attempt ${attempt + 1} notice: ${sanitizeErrorMessage(err)}. Retrying in ${CHUNK_RETRY_DELAY_MS / 1000}s...`);
+              addLog(`⚠️ Segment ${i + 1} hit an issue (${describeAnalysisError(err)}) — retrying…`);
+              console.warn(`Segment ${i + 1} attempt ${attempt + 1} failed:`, sanitizeErrorMessage(err));
               await new Promise((r) => setTimeout(r, CHUNK_RETRY_DELAY_MS));
             }
           }
         }
 
-        if (!chunkSuccess) {
-          addLog(`⚠️ Segment ${i + 1} notice: ${lastChunkErr ? sanitizeErrorMessage(lastChunkErr) : 'High demand'}. Generating grounded summary fallback for ${timeSpan}.`);
-          const fallbackResult: ChunkAnalysisResult = {
-            chunkIndex: i,
-            startSec: chunk.nominalStartSec,
-            endSec: chunk.nominalEndSec,
-            summary: `Summary for segment ${timeSpan}: Explanations and demonstrations for ${videoTitle}.`,
-            keyTakeaways: [`Segment ${i + 1} covers material from ${timeSpan}.`],
-            transcript: [
-              {
-                id: `chunk-${i}-t-fallback`,
-                startSec: chunk.nominalStartSec,
-                endSec: chunk.nominalEndSec,
-                timestampStr: formatTimestamp(chunk.nominalStartSec),
-                speaker: authorName || 'Speaker',
-                text: `Key instruction and demonstrations in window [${timeSpan}].`,
-                chunkIndex: i,
-              },
-            ],
-            visualObservations: [],
-            scientificEntities: [],
-          };
-          chunkResults.push(fallbackResult);
-          // Keep the final transcript continuous even when a segment fell back.
+        return {
+          result: null,
+          elapsedSec: Math.round((Date.now() - windowStartedAt) / 1000),
+          failure: lastChunkErr,
+        };
+      };
+
+      /**
+       * Two windows run at once, and their results merge strictly in segment
+       * order. Each Gemini call spends most of its wall time on the server's
+       * video ingest, so a second in-flight request is nearly free and roughly
+       * halves the total wait on long videos — while the overlap dedupe still
+       * behaves exactly like the previous sequential loop.
+       */
+      const WINDOW_CONCURRENCY = 2;
+
+      for (let batchStart = 0; batchStart < planned.length; batchStart += WINDOW_CONCURRENCY) {
+        if (analysisSignal.aborted) {
+          throw new DOMException('Analysis cancelled', 'AbortError');
+        }
+        const batchEnd = Math.min(planned.length, batchStart + WINDOW_CONCURRENCY);
+
+        setActiveChunkIndex(batchStart);
+        setProgressPercent(Math.round(20 + (batchStart / planned.length) * 65));
+        setStatusMessage(`Analyzing segments ${batchStart + 1}${batchEnd > batchStart + 1 ? `–${batchEnd}` : ''} of ${planned.length}…`);
+
+        const batch = await Promise.all(
+          planned
+            .slice(batchStart, batchEnd)
+            .map((_chunk, offset) => analyzeWindow(batchStart + offset))
+        );
+
+        if (analysisSignal.aborted) {
+          throw new DOMException('Analysis cancelled', 'AbortError');
+        }
+
+        // Merge batch results in segment order: the overlap dedupe assumes the
+        // previous segment's entries are already in the transcript.
+        for (let offset = 0; offset < batch.length; offset++) {
+          const i = batchStart + offset;
+          const chunk = planned[i];
+          const { result: windowResult, elapsedSec, failure } = batch[offset];
+          const timeSpan = `${formatTimestamp(chunk.nominalStartSec)} - ${formatTimestamp(chunk.nominalEndSec)}`;
+
+          let analysisResult: ChunkAnalysisResult;
+          if (windowResult) {
+            analysisResult = windowResult;
+          } else {
+            addLog(`⚠️ Segment ${i + 1} could not be analyzed (${describeAnalysisError(failure)}) — inserting a brief note for [${timeSpan}] so the file stays complete.`);
+            console.warn(`Segment ${i + 1} fell back after 3 attempts:`, sanitizeErrorMessage(failure));
+            analysisResult = {
+              chunkIndex: i,
+              startSec: chunk.nominalStartSec,
+              endSec: chunk.nominalEndSec,
+              summary: `Summary for segment ${timeSpan}: Explanations and demonstrations for ${videoTitle}.`,
+              keyTakeaways: [`Segment ${i + 1} covers material from ${timeSpan}.`],
+              transcript: [
+                {
+                  id: `chunk-${i}-t-fallback`,
+                  startSec: chunk.nominalStartSec,
+                  endSec: chunk.nominalEndSec,
+                  timestampStr: formatTimestamp(chunk.nominalStartSec),
+                  speaker: authorName || 'Speaker',
+                  text: `Key instruction and demonstrations in window [${timeSpan}].`,
+                  chunkIndex: i,
+                },
+              ],
+              visualObservations: [],
+              scientificEntities: [],
+            };
+          }
+          chunkResults.push(analysisResult);
+
+          // Deduplicate overlap with the previous chunk
           if (i > 0) {
-            const fallbackDedupe = deduplicateOverlapEntries(
+            const dedupe = deduplicateOverlapEntries(
               cumulativeTranscript,
-              fallbackResult.transcript,
+              analysisResult.transcript,
               chunk.nominalStartSec,
               CHUNK_OVERLAP_SEC
             );
-            cumulativeTranscript = fallbackDedupe.merged;
+            cumulativeTranscript = dedupe.merged;
           } else {
-            cumulativeTranscript = [...fallbackResult.transcript];
+            cumulativeTranscript = [...analysisResult.transcript];
           }
+
+          cumulativeVisuals.push(...analysisResult.visualObservations);
+          addLog(`✓ Segment ${i + 1} done in ${elapsedSec}s — ${analysisResult.transcript.length} transcript moments, ${analysisResult.visualObservations.length} visual notes.`);
+
           setPlannedChunks((prev) =>
             prev.map((c, idx) => (idx === i ? { ...c, status: 'completed' } : c))
           );
+          setProgressPercent(Math.round(20 + ((i + 1) / planned.length) * 65));
         }
       }
 
@@ -866,7 +896,7 @@ export default function App() {
 
       setProgressPercent(100);
       setStatusMessage('Markdown generation complete!');
-      addLog(`Markdown document created successfully (${fullReport.markdownContent.split('\n').length} lines).`);
+      addLog(`Markdown document created successfully (${fullReport.markdownContent.split('\n').length} lines) in ${Math.round((Date.now() - runStartedAt) / 1000)}s.`);
     } catch (err: any) {
       // A stale run (cancelled, or superseded by a newer analysis) must never
       // clobber UI state that belongs to the current run.

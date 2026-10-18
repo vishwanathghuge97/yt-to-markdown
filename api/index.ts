@@ -353,6 +353,9 @@ async function generateWithCascade(
           if (jsonMode) {
             config.responseMimeType = 'application/json';
           }
+          // Low reasoning depth keeps interactive note generation fast; the
+          // client mirrors this in services/clientGemini.ts.
+          config.thinkingConfig = { thinkingLevel: 'LOW' };
 
           const videoPart: any = {
             fileData: {
@@ -404,7 +407,8 @@ async function generateWithCascade(
 
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const config: any = {};
+        // Text-only path: same low reasoning depth as the video path.
+        const config: any = { thinkingConfig: { thinkingLevel: 'LOW' } };
         if (jsonMode) {
           config.responseMimeType = 'application/json';
         }

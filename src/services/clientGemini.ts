@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { FullAnalysisReport, ChapterCluster, TranscriptEntry, VisualObservation, VideoMetadata } from '../types/pipeline';
 import { formatTimestamp } from '../shared/time';
 import { extractYouTubeVideoId, getCanonicalYouTubeUrl } from '../shared/youtubeUrl';
@@ -14,6 +14,35 @@ import { CHUNK_OVERLAP_SEC, DEFAULT_CHUNK_DURATION_SEC } from './pipelineEngine'
 // Re-exported so existing importers of this module keep working; the
 // implementations live in src/shared to keep client and server in lockstep.
 export { extractYouTubeVideoId, getCanonicalYouTubeUrl, sanitizeErrorMessage };
+
+/**
+ * Hard per-attempt ceiling so a hung Gemini request can never stall the UI
+ * forever. Generous enough for legitimate video ingestion + generation, but a
+ * stuck call falls through to the next model instead of hanging indefinitely.
+ */
+const FULL_NOTES_CALL_TIMEOUT_MS = 150_000;
+const CHUNK_CALL_TIMEOUT_MS = 100_000;
+
+/** Low reasoning depth: this is structured extraction, and default-depth thinking dominates wall time. */
+const NOTES_THINKING_CONFIG = { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } };
+
+/** Combines the user's cancel signal with a per-attempt timeout signal. */
+function withAttemptTimeout(
+  abortSignal: AbortSignal | undefined,
+  timeoutMs: number
+): AbortSignal | undefined {
+  if (typeof AbortSignal?.timeout !== 'function') return abortSignal;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  if (!abortSignal) return timeoutSignal;
+  if (typeof AbortSignal?.any === 'function') {
+    return AbortSignal.any([abortSignal, timeoutSignal]);
+  }
+  const combined = new AbortController();
+  const forward = (source: AbortSignal) => source.addEventListener('abort', () => combined.abort(), { once: true });
+  forward(abortSignal);
+  forward(timeoutSignal);
+  return combined.signal;
+}
 
 /**
  * Client-Side Direct Gemini Single-Pass Generator.
@@ -151,9 +180,9 @@ Return STRICT JSON:
   let lastError: any = null;
   let quotaError: any = null;
 
-  for (const model of GEMINI_MODELS) {
+  for (const [modelIndex, model] of GEMINI_MODELS.entries()) {
     try {
-      onProgress?.(`Contacting Google Gemini directly (${model})...`);
+      onProgress?.(`Analyzing the video with Gemini (attempt ${modelIndex + 1} of ${GEMINI_MODELS.length})…`);
 
       const response = await ai.models.generateContent({
         model,
@@ -173,7 +202,8 @@ Return STRICT JSON:
         ],
         config: {
           responseMimeType: 'application/json',
-          abortSignal,
+          ...NOTES_THINKING_CONFIG,
+          abortSignal: withAttemptTimeout(abortSignal, FULL_NOTES_CALL_TIMEOUT_MS),
         },
       });
 
@@ -414,7 +444,8 @@ Return STRICT JSON:
         ],
         config: {
           responseMimeType: 'application/json',
-          abortSignal,
+          ...NOTES_THINKING_CONFIG,
+          abortSignal: withAttemptTimeout(abortSignal, CHUNK_CALL_TIMEOUT_MS),
         },
       });
 
