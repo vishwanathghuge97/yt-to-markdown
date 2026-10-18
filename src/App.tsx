@@ -524,6 +524,7 @@ export default function App() {
                 coveredChunks: [idx],
                 overview: c.overview || '',
                 keyConcepts: Array.isArray(c.keyConcepts) ? c.keyConcepts : [],
+                codeDemonstrated: c.codeDemonstrated || '',
                 scientificHighlights: [],
               }));
 

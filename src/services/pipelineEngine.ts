@@ -178,6 +178,44 @@ export function deduplicateOverlapEntries(
   return { merged, dedupedCount };
 }
 
+/** Hard-truncates text without cutting mid-word (single long words fall back to a raw cut). */
+function truncateAtWord(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  const cut = text.slice(0, maxLen);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace >= Math.floor(maxLen * 0.6) ? cut.slice(0, lastSpace) : cut).trim();
+}
+
+/** Trims trailing punctuation/whitespace so a takeaway flows cleanly inside a template sentence. */
+function inlineSummaryItem(text: unknown): string {
+  return markdownText(text, '').replace(/[\s.,;:!?]+$/, '').trim();
+}
+
+/**
+ * Builds a clean, single-line chapter heading from raw model text. Strips
+ * markdown noise (backticks/asterisks/etc.), collapses whitespace, prefers the
+ * first sentence, and truncates at a word boundary so headings never end
+ * mid-word — previously a raw 70-char slice left headings like
+ * 'Create routes with `app.use("/a' with unbalanced backticks breaking the
+ * inline-code rendering of everything after them.
+ */
+function chapterTitleFrom(text: unknown, fallback: string, maxLen = 70): string {
+  const cleaned = markdownOneLine(text, '')
+    .replace(/[*`#>]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return '';
+  const firstSentence = cleaned.split(/(?<=[.!?])\s+/)[0] || cleaned;
+  const candidate = truncateAtWord(firstSentence, maxLen);
+  return (
+    candidate
+      .replace(/[.,;:!?\s]+$/, '')
+      // Drop dangling connector words left behind by the word-boundary cut.
+      .replace(/\s+(and|or|with|to|for|of|in|on|the)$/i, '')
+      .trim() || fallback
+  );
+}
+
 /**
  * Synthesizes individual chunk results into structured chapters
  */
@@ -192,9 +230,11 @@ export function performHierarchicalReduce(
     const chapterIdx = i + 1;
     const timeRangeStr = `${formatTimestamp(chunk.startSec)} - ${formatTimestamp(chunk.endSec)}`;
 
-    // Prefer the model-derived topic title; fall back to a numbered module name.
+    // Prefer a clean title derived from the chunk summary; fall back to a
+    // numbered module name instead of slicing raw takeaways mid-word.
     const title =
-      chunk.keyTakeaways[0]?.slice(0, 70) ||
+      chapterTitleFrom(chunk.summary, '') ||
+      chapterTitleFrom(chunk.keyTakeaways[0] || '', '') ||
       `Module ${chapterIdx}: ${timeRangeStr}`;
 
     chapters.push({
@@ -212,15 +252,21 @@ export function performHierarchicalReduce(
 
   const allTakeaways = chapters.flatMap((c) => c.keyConcepts);
   const isShort = videoMetadata.durationSec <= 600;
-  const maxTakeaways = isShort ? 3 : 6;
-  const keyTakeaways = Array.from(new Set(allTakeaways)).slice(0, maxTakeaways);
+  const keyTakeaways = Array.from(new Set(allTakeaways))
+    .map((item) => markdownText(item))
+    .filter(Boolean)
+    .slice(0, isShort ? 3 : 6);
+
+  // Sentence fragments are joined with semicolons after trimming trailing
+  // punctuation, so items ending in '.' never produce "structure.. ..." text.
+  const lessonList = keyTakeaways.map((item) => inlineSummaryItem(item)).join('; ');
 
   const durationStr = formatTimestamp(videoMetadata.durationSec);
   const executiveSummary =
     chapters.length > 0
       ? isShort
-        ? `This summary covers "${videoMetadata.title}" by ${videoMetadata.channel} (${durationStr}). It highlights key lessons: ${keyTakeaways.join(', ')}.`
-        : `This comprehensive breakdown for "${videoMetadata.title}" by ${videoMetadata.channel} covers ${durationStr}. Across ${chapters.length} structured chapters, the material examines: ${keyTakeaways.slice(0, 3).join(', ')}. The notes provide in-depth takeaways and practical insights.`
+        ? `This summary covers "${videoMetadata.title}" by ${videoMetadata.channel} (${durationStr}). It highlights key lessons: ${lessonList}.`
+        : `This comprehensive breakdown for "${videoMetadata.title}" by ${videoMetadata.channel} covers ${durationStr}. Across ${chapters.length} structured chapters, the material examines: ${lessonList}. The notes provide in-depth takeaways and practical insights.`
       : 'Executive summary not generated.';
 
   return { chapters, executiveSummary, keyTakeaways };
